@@ -2,6 +2,8 @@ import { and, asc, eq, gte, inArray, isNull, lt, lte, or, sql } from "drizzle-or
 import { db, schema } from "@/db";
 import type { Account, Campaign, Lead } from "@/db/schema";
 import { renderTemplate } from "../campaigns/template";
+import { hasAiSteps } from "../drafting";
+import { enqueueDraft } from "../queue";
 import { env } from "../env";
 import {
   UnipileError,
@@ -63,6 +65,15 @@ async function countSince(accountId: string, types: Kind[], since: Date, campaig
   return n;
 }
 
+/** Queues AI drafting for a lead. A failure here must not stop sending. */
+async function requestDrafts(leadStateId: string) {
+  try {
+    await enqueueDraft(leadStateId);
+  } catch (e) {
+    console.error(`[engine] could not queue drafting for ${leadStateId}:`, e);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Lead state transitions
 
@@ -91,6 +102,8 @@ export async function markAccepted(leadStateId: string) {
     })
     .where(eq(schema.leadState.id, leadStateId));
   if (row.s.accountId) await log(row.s.accountId, "invite.accepted", { campaignId: row.c.id, leadStateId });
+  // Draft after acceptance (plan section 4): only accepted leads cost a full sequence.
+  if (step && hasAiSteps(row.c)) await requestDrafts(leadStateId);
 }
 
 export async function markReplied(leadStateId: string) {
@@ -158,6 +171,7 @@ const mock = {
     return mock.profileOk(lead);
   },
   profileOk: (lead: Lead) => ({
+    details: { headline: lead.headline, summary: `Mock profile summary for ${lead.firstName}.`, location: lead.location },
     providerId: lead.linkedinId ?? `MOCKP-${lead.publicIdentifier}`,
     publicIdentifier: lead.publicIdentifier,
     networkDistance: hash(lead.id) % 10 === 9 ? "FIRST_DEGREE" : "SECOND_DEGREE",
@@ -177,9 +191,7 @@ async function ensureProfile({ a, lead, c, s }: Ctx) {
   if (!identifier) throw new UnipileError(404, "errors/no_identifier", "Lead has no LinkedIn identifier");
   const p = MOCK() ? mock.profile(lead) : await getProfile(a.unipileAccountId!, identifier);
   await log(a.id, "profile.lookup", { campaignId: c.id, leadStateId: s.id });
-  if (p.providerId !== lead.providerId) {
-    await db.update(schema.leads).set({ providerId: p.providerId }).where(eq(schema.leads.id, lead.id));
-  }
+  await db.update(schema.leads).set({ providerId: p.providerId, profile: p.details }).where(eq(schema.leads.id, lead.id));
   return p;
 }
 
@@ -193,6 +205,7 @@ async function doInvite(ctx: Ctx): Promise<boolean> {
     const step = c.steps[1];
     const at = new Date(Date.now() + (step?.waitDays ?? 0) * dayMs());
     await release(s.id, { ...base, inviteSentAt: null, acceptedAt: new Date(), waiting: null, nextRunAt: at, note: "Already connected. Skipped the invite" });
+    if (hasAiSteps(c)) await requestDrafts(s.id);
     return true;
   }
   if (!profile.invitePending) {
@@ -238,7 +251,14 @@ async function doMessage(ctx: Ctx): Promise<boolean> {
       .where(and(eq(schema.messageDrafts.leadStateId, s.id), eq(schema.messageDrafts.stepIndex, s.stepIndex), eq(schema.messageDrafts.status, "approved")))
       .limit(1);
     if (!draft) {
-      await release(s.id, { waiting: "approval", note: "Waiting for an approved draft" });
+      const [pending] = await db
+        .select({ id: schema.messageDrafts.id })
+        .from(schema.messageDrafts)
+        .where(and(eq(schema.messageDrafts.leadStateId, s.id), eq(schema.messageDrafts.stepIndex, s.stepIndex), eq(schema.messageDrafts.status, "drafted")))
+        .limit(1);
+      await release(s.id, { waiting: "approval", note: pending ? "Drafts ready for review" : "Drafting messages" });
+      // Backup for drafting that never happened (or failed): ask again.
+      if (!pending) await requestDrafts(s.id);
       return false;
     }
     text = draft.body;
@@ -312,13 +332,18 @@ export async function processAccount(a: Account): Promise<"acted" | "idle" | "ou
   const accountCanMessage = actionsLeft && messages24 < Math.min(a.dailyMessageLimit, SAFETY.maxMessagesPerDay);
 
   // Per-campaign daily limits, counted from the start of the campaign's local day.
-  const inviteCampaigns: string[] = [];
+  const invitable: { id: string; sent: number }[] = [];
   const messageCampaigns: string[] = [];
   for (const c of open) {
     const since = MOCK() ? day : startOfLocalDay(c.timezone, now);
     if (accountCanMessage && (await countSince(a.id, ["message.sent"], since, c.id)) < c.dailyMessageLimit) messageCampaigns.push(c.id);
-    if (accountCanInvite && (await countSince(a.id, ["invite.sent"], since, c.id)) < c.dailyInviteLimit) inviteCampaigns.push(c.id);
+    if (accountCanInvite) {
+      const sent = await countSince(a.id, ["invite.sent"], since, c.id);
+      if (sent < c.dailyInviteLimit) invitable.push({ id: c.id, sent });
+    }
   }
+  // Share invites fairly between campaigns: the one this account has invited for least today goes first.
+  const inviteCampaigns = invitable.sort((x, y) => x.sent - y.sent || Math.random() - 0.5).map((x) => x.id);
   if (!inviteCampaigns.length && !messageCampaigns.length) return "at-limit";
 
   // Up to a few attempts: a lead waiting for approval or skipped costs no LinkedIn action.
@@ -336,10 +361,11 @@ export async function processAccount(a: Account): Promise<"acted" | "idle" | "ou
         ),
       );
     }
-    if (!id && inviteCampaigns.length) {
+    for (const campaignId of inviteCampaigns) {
+      if (id) break;
       id = await claim(
         and(
-          inArray(schema.leadState.campaignId, inviteCampaigns),
+          eq(schema.leadState.campaignId, campaignId),
           eq(schema.leadState.status, "pending"),
           or(isNull(schema.leadState.accountId), eq(schema.leadState.accountId, a.id)),
           unlocked(),

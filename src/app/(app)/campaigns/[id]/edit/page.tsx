@@ -68,6 +68,7 @@ export default async function EditCampaignPage({ params }: PageProps<"/campaigns
             activeTo: c.activeTo,
             dailyInviteLimit: c.dailyInviteLimit,
             dailyMessageLimit: c.dailyMessageLimit,
+            approvalMode: c.approvalMode === "auto" ? "auto" : "manual",
           }}
           products={products}
           styles={styles}

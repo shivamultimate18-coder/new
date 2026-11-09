@@ -148,6 +148,8 @@ export const leads = pgTable(
     publicIdentifier: text("public_identifier"),
     /** LinkedIn member id as Unipile uses it for invites and messages; looked up before the first action. */
     providerId: text("provider_id"),
+    /** Profile details from the lookup before the invite (summary, current role), used for drafting. */
+    profile: jsonb("profile").$type<Record<string, unknown>>(),
     profileUrl: text("profile_url"),
     firstName: text("first_name").notNull().default(""),
     lastName: text("last_name").notNull().default(""),
@@ -295,6 +297,8 @@ export const campaigns = pgTable("campaigns", {
   activeTo: text("active_to").notNull().default("17:00"),
   dailyInviteLimit: integer("daily_invite_limit").notNull().default(10),
   dailyMessageLimit: integer("daily_message_limit").notNull().default(20),
+  /** "manual": a person approves every lead's drafts. "auto": drafts without rule warnings are approved automatically. */
+  approvalMode: text("approval_mode").notNull().default("manual"),
   createdByUserId: uuid("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
   launchedAt: timestamp("launched_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -359,6 +363,14 @@ export const leadState = pgTable(
     repliedAt: timestamp("replied_at", { withTimezone: true }),
     chatId: text("chat_id"),
     note: text("note"),
+    // Drafting (Phase 6)
+    /** How well the lead fits the product, 1 (poor) to 5 (ideal), with the reason. */
+    fitScore: integer("fit_score"),
+    fitReason: text("fit_reason"),
+    /** The idea the drafted sequence is built on. */
+    angle: text("angle"),
+    draftError: text("draft_error"),
+    draftedAt: timestamp("drafted_at", { withTimezone: true }),
     enrolledAt: timestamp("enrolled_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
@@ -387,6 +399,8 @@ export const messageDrafts = pgTable(
     stepIndex: integer("step_index").notNull(),
     body: text("body").notNull(),
     status: draftStatus("status").notNull().default("drafted"),
+    /** Message rules this draft breaks, from the code check. */
+    warnings: jsonb("warnings").$type<string[]>().notNull().default([]),
     version: integer("version").notNull().default(1),
     approvedByUserId: uuid("approved_by_user_id").references(() => users.id, { onDelete: "set null" }),
     approvedAt: timestamp("approved_at", { withTimezone: true }),

@@ -60,6 +60,7 @@ const Payload = z.object({
     .int("Connection requests per day must be a whole number.")
     .min(1, "Send at least 1 connection request per day.")
     .max(LIMITS.invites, `Connection requests are capped at ${LIMITS.invites} per account per day to keep accounts safe.`),
+  approvalMode: z.enum(["manual", "auto"]),
   dailyMessageLimit: z
     .number({ message: "Enter a number of messages per day." })
     .int("Messages per day must be a whole number.")
@@ -124,6 +125,7 @@ export async function saveCampaign(id: string, input: CampaignPayload): Promise<
         activeTo: p.activeTo,
         dailyInviteLimit: p.dailyInviteLimit,
         dailyMessageLimit: p.dailyMessageLimit,
+        approvalMode: p.approvalMode,
         updatedAt: new Date(),
       })
       .where(eq(schema.campaigns.id, id));
@@ -188,6 +190,7 @@ export async function duplicateCampaign(fd: FormData) {
       activeTo: c.activeTo,
       dailyInviteLimit: c.dailyInviteLimit,
       dailyMessageLimit: c.dailyMessageLimit,
+      approvalMode: c.approvalMode,
       createdByUserId: user.id,
     })
     .returning();

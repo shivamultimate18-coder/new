@@ -203,6 +203,8 @@ export function isPermanentUnipileError(e: unknown): boolean {
 // Sending (Phase 5). Shapes follow Unipile's users and messaging docs; verify before going live.
 
 export type LinkedInProfile = {
+  /** Selected profile fields kept for drafting. */
+  details: Record<string, unknown>;
   providerId: string;
   publicIdentifier: string | null;
   /** FIRST_DEGREE means already connected. */
@@ -217,8 +219,12 @@ export async function getProfile(unipileAccountId: string, identifier: string): 
     public_identifier?: string | null;
     network_distance?: string | null;
     invitation?: { type?: string; status?: string } | null;
+    headline?: string | null;
+    summary?: string | null;
+    location?: string | null;
   }>("GET", `/users/${encodeURIComponent(identifier)}?account_id=${encodeURIComponent(unipileAccountId)}`);
   return {
+    details: { headline: r.headline ?? null, summary: r.summary ?? null, location: r.location ?? null },
     providerId: r.provider_id,
     publicIdentifier: r.public_identifier ?? null,
     networkDistance: r.network_distance ?? null,

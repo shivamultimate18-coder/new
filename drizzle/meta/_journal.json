@@ -43,6 +43,13 @@
       "when": 1794259549466,
       "tag": "0005_light_red_ghost",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1794260371636,
+      "tag": "0006_shiny_praxagora",
+      "breakpoints": true
     }
   ]
 }

@@ -5,7 +5,15 @@ import { env } from "./env";
 
 export const QUEUES = {
   importPage: "lead-import-page",
+  draft: "draft-messages",
 } as const;
+
+export type DraftJob = { leadStateId: string };
+
+export async function enqueueDraft(leadStateId: string) {
+  const boss = await getBoss();
+  await boss.send(QUEUES.draft, { leadStateId } satisfies DraftJob);
+}
 
 export type ImportPageJob = { listId: string; token: string };
 

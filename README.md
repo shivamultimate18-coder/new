@@ -5,7 +5,28 @@ Self-hosted multi-account LinkedIn outreach tool. The plan is in
 [docs/sendroq-scrape.md](docs/sendroq-scrape.md) (used to understand the features only; all
 wording and design here are our own).
 
-## Status: Phases 1 to 5 done
+## Status: Phases 1 to 6 done
+
+Phase 6, drafting and Message Review:
+
+- **Drafting after acceptance** (plan section 4): when a lead accepts, the worker drafts
+  every AI message in that lead's sequence with one Claude Sonnet 5.5 call
+  (`src/lib/drafting.ts`). The same call scores the lead's fit with the product (1 to 5,
+  with a reason) and records the angle. If drafting is missed or fails, the engine asks
+  again when the lead's first AI step comes due.
+- **Any sequence:** each message gets a role (opener, follow-ups, last note). Product facts
+  are offered and checked by role: the opener has no link, price or free offer; follow-ups
+  may give the price and proof but no links; the last note may use the free offer and the
+  booking link but not the price. Template and already-sent messages are shown to Claude
+  as context so they are not repeated. The campaign's playbook brief is part of the prompt.
+- **Message Review** (`/message-review`): To review, Approved and Sent queues; filter by
+  campaign or name; approve leads in bulk. Each lead opens a panel with every message (edit
+  with live rule checks, approve, regenerate with an instruction, exclude the lead, teach
+  the writing style from feedback) and the lead's details, fit score and angle. Sent
+  messages are locked and never appear in the review queue.
+- **Approval per campaign:** "Review every lead" (default) or "Send automatically", where
+  drafts that pass every rule are approved on their own and the rest still wait for review.
+- Approving a lead the engine is holding releases it at once.
 
 Phase 5, sending engine (`src/lib/engine/engine.ts`, run by the worker):
 
@@ -90,10 +111,7 @@ Phase 1:
   secret). A status other than Connected switches sending off for that account.
 - Docker, Docker Compose and Caddy files for the Hetzner deploy
 
-Not built yet: everything from Phase 6 (drafting and Message Review) on. Message drafting currently
-writes three messages (opener, follow-up, last note); Phase 6 extends it to every AI step
-in a campaign's sequence and adds the playbook brief to the prompt. Accounts start at 5 invites and
-20 messages a day; the Phase 5 sending engine will raise these during warm-up.
+Not built yet: Phase 7 (Inbox) onward.
 
 ## Local development
 

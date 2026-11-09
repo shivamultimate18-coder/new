@@ -61,7 +61,7 @@ function LeadPicker({ onPick }: { onPick: (l: LeadOption | null) => void }) {
   );
 }
 
-function RuleProposals({ styleId, rules, onDone }: { styleId: string; rules: RuleSet; onDone: () => void }) {
+export function RuleProposals({ styleId, rules, onDone }: { styleId: string; rules: RuleSet; onDone: () => void }) {
   const all = [...rules.do.map((r) => ({ kind: "do" as const, r })), ...rules.dont.map((r) => ({ kind: "dont" as const, r }))];
   const [selected, setSelected] = useState(() => new Set(all.map((_, i) => i)));
   const [error, setError] = useState<string | null>(null);

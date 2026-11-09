@@ -1,10 +1,11 @@
 // Background worker: lead imports (queue jobs) and the sending engine (a tick loop).
 // Run with: npm run worker
 import { PgBoss } from "pg-boss";
+import { generateDrafts } from "../src/lib/drafting";
 import { tick } from "../src/lib/engine/engine";
 import { runImportPage } from "../src/lib/imports";
 import { QUEUES, ensureQueues } from "../src/lib/queue";
-import type { ImportPageJob } from "../src/lib/queue";
+import type { DraftJob, ImportPageJob } from "../src/lib/queue";
 
 const TICK_MS = process.env.UNIPILE_MOCK === "1" ? 3_000 : 60_000;
 
@@ -19,6 +20,13 @@ async function main() {
   await boss.work<ImportPageJob>(QUEUES.importPage, { localConcurrency: 4 }, async ([job]) => {
     const outcome = await runImportPage(job.data.listId, job.data.token);
     console.log(`[import] list=${job.data.listId} ${outcome}`);
+    return { outcome };
+  });
+
+  // AI drafting after acceptance. Few at a time to stay inside Claude rate limits.
+  await boss.work<DraftJob>(QUEUES.draft, { localConcurrency: 3 }, async ([job]) => {
+    const outcome = await generateDrafts(job.data.leadStateId);
+    console.log(`[draft] lead=${job.data.leadStateId} ${outcome}`);
     return { outcome };
   });
 

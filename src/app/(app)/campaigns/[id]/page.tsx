@@ -198,7 +198,7 @@ export default async function CampaignPage({ params, searchParams }: PageProps<"
                   {i > 0 && <span className="text-muted">wait {s.waitDays} day{s.waitDays === 1 ? "" : "s"} {i === 1 ? "after acceptance" : "if no reply"}</span>}
                 </div>
                 <p className="mt-1 text-muted">
-                  {s.mode === "blank" ? "No note" : s.mode === "ai" ? "Drafted by AI for each lead, then reviewed" : "Template"}
+                  {s.mode === "blank" ? "No note" : s.mode === "ai" ? (c.approvalMode === "auto" ? "Drafted by AI for each lead, approved automatically if it passes every rule" : "Drafted by AI for each lead, then reviewed") : "Template"}
                 </p>
                 {s.mode === "template" && <p className="mt-2 whitespace-pre-wrap rounded bg-canvas p-2">{s.template}</p>}
               </li>
@@ -216,6 +216,7 @@ export default async function CampaignPage({ params, searchParams }: PageProps<"
               ["Active days", c.activeDays.map((d) => DAYS[d]).join(", ") || "None"],
               ["Active hours", `${c.activeFrom} to ${c.activeTo} (${c.timezone})`],
               ["Daily limits per account", `${c.dailyInviteLimit} connection requests, ${c.dailyMessageLimit} messages`],
+              ["Review", c.approvalMode === "auto" ? "Send automatically when drafts pass every rule" : "A teammate approves every lead"],
               ["Sending accounts", accounts.map(({ a }) => `${a.name || "LinkedIn account"}${a.status !== "ok" || !a.enabled ? " (not usable)" : ""}`).join(", ") || "None"],
             ].map(([k, v]) => (
               <div key={k}>

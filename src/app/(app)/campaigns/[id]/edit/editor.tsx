@@ -292,6 +292,29 @@ export function CampaignEditor(props: {
         )}
       </Section>
 
+      <Section title="Review" hint="AI drafts are written after a lead accepts. Choose who approves them.">
+        <div className="grid gap-3 sm:grid-cols-2" role="radiogroup" aria-label="Approval">
+          {(
+            [
+              ["manual", "Review every lead", "A teammate approves each lead's drafts in Message Review before anything is sent. Recommended for new campaigns."],
+              ["auto", "Send automatically", "Drafts that pass every message rule are approved on their own. Drafts with a rule warning still wait for review. Use once a campaign has proven itself."],
+            ] as const
+          ).map(([mode, title, text]) => (
+            <button
+              key={mode}
+              type="button"
+              role="radio"
+              aria-checked={v.approvalMode === mode}
+              onClick={() => set({ approvalMode: mode })}
+              className={`rounded-lg border p-3 text-left text-sm ${v.approvalMode === mode ? "border-brand bg-brand/5" : "border-line hover:bg-canvas"}`}
+            >
+              <span className="font-medium">{title}</span>
+              <span className="mt-0.5 block text-muted">{text}</span>
+            </button>
+          ))}
+        </div>
+      </Section>
+
       <Section title="Sending accounts" hint="Each lead is contacted by one of these accounts from start to finish. Members can choose their own accounts; admins any.">
         {props.accounts.length === 0 ? (
           <p className="text-sm text-muted">No accounts yet. <Link href="/accounts" className="text-brand hover:underline">Connect one</Link>.</p>
