@@ -78,6 +78,13 @@
       "when": 1794263705114,
       "tag": "0010_graceful_phalanx",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1794264534314,
+      "tag": "0011_tired_medusa",
+      "breakpoints": true
     }
   ]
 }

@@ -6,6 +6,7 @@ import { db, schema } from "@/db";
 import { pct, rate } from "@/lib/analytics";
 import { requireUser } from "@/lib/auth";
 import { SAFETY } from "@/lib/engine/engine";
+import { isFuture } from "@/lib/time";
 
 export const instant = false;
 export const metadata: Metadata = { title: "Account health" };
@@ -52,6 +53,8 @@ export default async function HealthPage() {
     if (s.invites24 > a.dailyInviteLimit) problems.push("Over the daily invite limit");
     if (s.invites7d > SAFETY.invitesPerWeek) problems.push("Over the weekly invite limit");
     if (s.actions24 > SAFETY.actionsPerDay) problems.push("Over 120 actions in 24 hours");
+    if (isFuture(a.invitesPausedUntil)) problems.push(`Invites paused until ${a.invitesPausedUntil.toISOString().slice(0, 16).replace("T", " ")} UTC (LinkedIn limit)`);
+    if (a.consecutiveRejects > 0) problems.push(`${a.consecutiveRejects} rejected request${a.consecutiveRejects === 1 ? "" : "s"} in a row`);
     if (a.consecutiveErrors > 0) problems.push(`${a.consecutiveErrors} error${a.consecutiveErrors === 1 ? "" : "s"} in a row`);
     const acceptance = rate(s.accepted14, s.invited14);
     // A low acceptance rate over a real sample is an early warning that LinkedIn may be limiting the account.

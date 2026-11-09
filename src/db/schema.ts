@@ -67,6 +67,10 @@ export const accounts = pgTable(
     nextActionAt: timestamp("next_action_at", { withTimezone: true }),
     /** Temporary errors in a row; three pause the account. */
     consecutiveErrors: integer("consecutive_errors").notNull().default(0),
+    /** Requests LinkedIn rejected in a row (bad recipient, content); five pause the account. */
+    consecutiveRejects: integer("consecutive_rejects").notNull().default(0),
+    /** LinkedIn's invitation limit was reached: no invites until then (messages continue). */
+    invitesPausedUntil: timestamp("invites_paused_until", { withTimezone: true }),
     lastErrorAt: timestamp("last_error_at", { withTimezone: true }),
     warmupRaisedAt: timestamp("warmup_raised_at", { withTimezone: true }),
     relationsCheckedAt: timestamp("relations_checked_at", { withTimezone: true }),

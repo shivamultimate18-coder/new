@@ -231,14 +231,16 @@ a reply, no leads left locked).
    `docker compose run --rm app npx tsx --conditions=react-server scripts/register-webhooks.ts`
 6. Open `https://app.yourdomain.com`, sign in, connect one lower-risk account.
 
-**Check before the first real connection:** the Unipile request and payload shapes in
-`src/lib/unipile.ts` (hosted login, account status, people search, search parameters,
-profile lookup, invites, chats and messages, chat list, relations), the webhook payloads
-(including how `is_sender` / `account_info.user_id` tell our messages from theirs) in
-`src/app/api/unipile/webhook/route.ts`, the error types in `classifyError`
-(`src/lib/engine/engine.ts`), the
-search result field names in `src/lib/linkedin.ts`, and the status names in
-`src/lib/accounts.ts` were written from
-Unipile's documentation as I know it, because developer.unipile.com was not reachable from
-the build environment. Compare them with the current docs (hosted auth, account status
-webhook) and test with one account.
+**Unipile API check (done 2026-11-09):** every request, response field, webhook payload
+and error type the app uses was compared with developer.unipile.com and corrected where it
+differed. Notable points from Unipile's docs that the engine follows:
+- `cannot_resend_yet` means LinkedIn's weekly invitation limit: invites from that account
+  pause for 3 days (messages continue), and also when LinkedIn reports 95% usage.
+- Many rejected requests can get an account disconnected: 5 in a row pause the account.
+- New-connection checks run a few times a day at random intervals (the webhook is the main
+  signal and can lag up to 8 hours).
+- Unipile's guidance for LinkedIn: about 100 profile views and 100 messages a day per
+  account; paid accounts 80 to 100 invites a day and about 200 a week, free accounts about
+  150 a week without a note and only a few notes a month. Accounts with under ~150
+  connections may have invites held for verification by LinkedIn. The app's defaults (15
+  invites a day, 75 a week) stay well under these.

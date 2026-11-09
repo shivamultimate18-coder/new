@@ -44,7 +44,8 @@ const MOCK = () => env.UNIPILE_MOCK;
  */
 export const dayMs = () => (MOCK() ? Number(process.env.MOCK_DAY_SECONDS || 10) * 1000 : 24 * 3600 * 1000);
 const gapMs = () => (MOCK() ? between(2_000, 5_000) : between(4 * 60_000, 11 * 60_000));
-const relationsEveryMs = () => (MOCK() ? 3_000 : 2 * 3600 * 1000);
+/** Backup check of new connections: the webhook is the main signal. Unipile advises a few checks a day at random times. */
+const relationsEveryMs = () => (MOCK() ? 3_000 : 4 * 3600 * 1000);
 const LOCK_MS = 10 * 60_000;
 
 type Kind = "invite.sent" | "message.sent" | "profile.lookup";
@@ -138,18 +139,48 @@ async function advance(leadStateId: string, c: Campaign, fromIndex: number, extr
 // ---------------------------------------------------------------------------
 // Errors
 
-type ErrorKind = "lead" | "account" | "transient" | "already-invited" | "already-connected";
+type ErrorKind = "lead" | "content" | "account" | "invite-limit" | "transient" | "already-invited" | "already-connected";
+
+// Unipile error types (developer.unipile.com, "Send an invitation" and "Provider limits").
+const ACCOUNT_ERRORS = new Set([
+  "disconnected_account", "expired_credentials", "invalid_credentials", "missing_credentials", "checkpoint_error",
+  "account_restricted", "action_required", "password_reset_required", "multiple_sessions", "session_mismatch",
+  "unauthorized", "wrong_account", "account_mismatch", "invalid_account", "account_configuration_error",
+  "connection_limit_reached", "limit_exceeded", "too_many_requests", "feature_not_subscribed", "disconnected_feature",
+  "subscription_required", "payment_error", "insufficient_credits", "insufficient_privileges", "insufficient_permissions",
+]);
+const CONTENT_ERRORS = new Set(["too_many_characters", "content_too_large", "invalid_message", "unescaped_characters"]);
+const TRANSIENT_ERRORS = new Set([
+  "request_timeout", "provider_unreachable", "network_down", "service_unavailable", "no_client_session",
+  "unexpected_error", "provider_error", "realtime_client_not_initialized",
+]);
 
 export function classifyError(e: unknown): ErrorKind {
   if (!(e instanceof UnipileError)) return "transient";
-  const t = e.type.toLowerCase();
-  if (/already_connected|first_degree/.test(t)) return "already-connected";
-  if (/already_invited|cannot_resend|invitation_pending/.test(t)) return "already-invited";
+  const t = e.type.toLowerCase().replace(/^errors\//, "");
+  if (t === "already_connected") return "already-connected";
+  if (t === "already_invited_recently") return "already-invited";
+  // LinkedIn's weekly invitation limit (Unipile: "422 / cannot_resend_yet").
+  if (t === "cannot_resend_yet") return "invite-limit";
+  if (ACCOUNT_ERRORS.has(t)) return "account";
+  if (CONTENT_ERRORS.has(t)) return "content";
+  if (TRANSIENT_ERRORS.has(t)) return "transient";
   if (e.status === 401 || e.status === 403 || e.status === 429) return "account";
-  if (/disconnected|credential|checkpoint|captcha|restricted|limit|quota|too_many|banned|suspended/.test(t)) return "account";
-  if (e.status === 404 || /not_found|cannot_be_reached|not_allowed|invalid_recipient|blocked|unprocessable/.test(t)) return "lead";
-  if (e.status === 400 || e.status === 422) return "lead";
-  return "transient";
+  if (e.status >= 500) return "transient";
+  // Recipient problems (cannot_invite_attendee, invalid_recipient, user_unreachable, resource_not_found,
+  // cannot_resend_within_..., ...) and any other 4xx concern this lead only.
+  return "lead";
+}
+
+/** Rejected requests in a row before an account is paused (Unipile warns many rejections can disconnect it). */
+const REJECTS_BEFORE_PAUSE = 5;
+
+/** LinkedIn's invitation limit: no invites from this account for a few days; messages continue. */
+export async function pauseInvites(a: Account, reason: string) {
+  const until = new Date(Date.now() + 3 * dayMs());
+  await db.update(schema.accounts).set({ invitesPausedUntil: until }).where(eq(schema.accounts.id, a.id));
+  await log(a.id, "account.invites_paused", { reason, until: until.toISOString() });
+  console.warn(`[engine] invites paused for account ${a.id} until ${until.toISOString()}: ${reason}`);
 }
 
 export async function pauseAccount(a: Account, reason: string) {
@@ -172,6 +203,7 @@ const mock = {
     // Test hooks: these first names make the mock fail the way LinkedIn can.
     if (lead.firstName === "FailAccount") throw new UnipileError(403, "errors/disconnected_account", "Mock: account disconnected");
     if (lead.firstName === "FailLead") throw new UnipileError(404, "errors/resource_not_found", "Mock: profile not found");
+    if (lead.firstName === "FailInviteLimit") throw new UnipileError(422, "errors/cannot_resend_yet", "Mock: invitation limit reached");
     return mock.profileOk(lead);
   },
   profileOk: (lead: Lead) => ({
@@ -267,7 +299,14 @@ async function doInvite(ctx: Ctx): Promise<boolean> {
         return true;
       }
     }
-    if (!MOCK()) await sendInvite(a.unipileAccountId!, profile.providerId, note);
+    if (!MOCK()) {
+      const { usage } = await sendInvite(a.unipileAccountId!, profile.providerId, note);
+      if (usage !== null && usage >= 90) {
+        await log(a.id, "account.invite_usage", { usage });
+        // Stop just short of LinkedIn's own limit rather than hitting it.
+        if (usage >= 95) await pauseInvites(a, `LinkedIn reports ${usage}% of the invitation allowance used`);
+      }
+    }
   }
   await log(a.id, "invite.sent", { campaignId: c.id, leadStateId: s.id });
   await release(s.id, { ...base, waiting: "acceptance", note: "Invite sent. Waiting for acceptance" });
@@ -416,7 +455,9 @@ export async function processAccount(a: Account): Promise<"acted" | "idle" | "ou
     countSince(a.id, ["invite.sent"], week),
   ]);
   const actionsLeft = actions24 < SAFETY.actionsPerDay;
-  const accountCanInvite = actionsLeft && invites24 < Math.min(a.dailyInviteLimit, SAFETY.maxInvitesPerDay) && invites7d < SAFETY.invitesPerWeek;
+  const invitesPaused = a.invitesPausedUntil !== null && a.invitesPausedUntil > now;
+  const accountCanInvite =
+    !invitesPaused && actionsLeft && invites24 < Math.min(a.dailyInviteLimit, SAFETY.maxInvitesPerDay) && invites7d < SAFETY.invitesPerWeek;
   const accountCanMessage = actionsLeft && messages24 < Math.min(a.dailyMessageLimit, SAFETY.maxMessagesPerDay);
 
   // Per-campaign daily limits, counted from the start of the campaign's local day.
@@ -476,7 +517,7 @@ export async function processAccount(a: Account): Promise<"acted" | "idle" | "ou
       if (acted) {
         await db
           .update(schema.accounts)
-          .set({ nextActionAt: new Date(Date.now() + gapMs()), lastActivityAt: new Date(), consecutiveErrors: 0 })
+          .set({ nextActionAt: new Date(Date.now() + gapMs()), lastActivityAt: new Date(), consecutiveErrors: 0, consecutiveRejects: 0 })
           .where(eq(schema.accounts.id, a.id));
         return "acted";
       }
@@ -491,8 +532,22 @@ export async function processAccount(a: Account): Promise<"acted" | "idle" | "ou
         const at = new Date(Date.now() + (c.steps[1]?.waitDays ?? 0) * dayMs());
         await release(row.s.id, { status: "active", stepIndex: 1, inviteSentAt: null, acceptedAt: new Date(), waiting: null, nextRunAt: at, note: "Already connected. Skipped the invite" });
         if (hasAiSteps(c)) await requestDrafts(row.s.id);
-      } else if (kind === "lead") {
-        await release(row.s.id, { status: "failed", note: `LinkedIn refused this lead: ${shortError(e).slice(0, 120)}` });
+      } else if (kind === "invite-limit" && row.s.status === "pending") {
+        // Not this lead's fault: hand it back and stop inviting from this account for a while.
+        await release(row.s.id, { accountId: null, inviteSentAt: null, note: null });
+        await pauseInvites(a, "LinkedIn's weekly invitation limit was reached");
+        return "acted";
+      } else if (kind === "lead" || kind === "content" || kind === "invite-limit") {
+        await release(row.s.id, {
+          status: "failed",
+          note: kind === "content" ? `LinkedIn rejected the message text: ${shortError(e).slice(0, 100)}` : `LinkedIn refused this lead: ${shortError(e).slice(0, 120)}`,
+        });
+        const rejects = a.consecutiveRejects + 1;
+        if (rejects >= REJECTS_BEFORE_PAUSE) {
+          await pauseAccount(a, `LinkedIn rejected ${rejects} requests in a row (last: ${e instanceof UnipileError ? e.type || e.status : "unknown"}). Check the campaign's messages and leads before switching it back on.`);
+          return "acted";
+        }
+        await db.update(schema.accounts).set({ consecutiveRejects: rejects }).where(eq(schema.accounts.id, a.id));
       } else if (kind === "account") {
         // Keep the lead on this account: if the lead itself somehow causes the error,
         // handing it on would pause every account in turn. It waits for this account.
@@ -524,7 +579,9 @@ export async function processAccount(a: Account): Promise<"acted" | "idle" | "ou
 // Acceptances, replies, housekeeping
 
 export async function pollRelations(a: Account) {
-  await db.update(schema.accounts).set({ relationsCheckedAt: new Date() }).where(eq(schema.accounts.id, a.id));
+  // Stored up to 4 hours ahead, so the next check comes after a random 4 to 8 hours.
+  const jitter = MOCK() ? 0 : between(0, 4 * 3600 * 1000);
+  await db.update(schema.accounts).set({ relationsCheckedAt: new Date(Date.now() + jitter) }).where(eq(schema.accounts.id, a.id));
   const waiting = await db
     .select({ s: schema.leadState, lead: schema.leads })
     .from(schema.leadState)

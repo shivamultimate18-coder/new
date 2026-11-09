@@ -123,9 +123,14 @@ export async function deleteAccount(unipileAccountId: string): Promise<void> {
  * (accepted invites). Run once per deployment (scripts/register-webhooks.ts).
  */
 export async function registerWebhooks(): Promise<unknown[]> {
+  // Webhooks created through the API carry no JSON content type unless asked to.
   const common = {
     request_url: `${env.APP_URL}/api/unipile/webhook`,
-    headers: [{ key: "x-webhook-secret", value: env.UNIPILE_WEBHOOK_SECRET }],
+    format: "json",
+    headers: [
+      { key: "Content-Type", value: "application/json" },
+      { key: "x-webhook-secret", value: env.UNIPILE_WEBHOOK_SECRET },
+    ],
   };
   return Promise.all([
     call("POST", "/webhooks", { ...common, source: "account_status", name: "account-status" }),
@@ -235,12 +240,17 @@ export async function getProfile(unipileAccountId: string, identifier: string): 
   };
 }
 
-export async function sendInvite(unipileAccountId: string, providerId: string, note: string | null): Promise<void> {
-  await call("POST", "/users/invite", {
+/**
+ * Sends a connection request. Returns LinkedIn's usage of the invitation allowance in percent,
+ * which Unipile includes only when it crosses 50, 75, 90 or 95.
+ */
+export async function sendInvite(unipileAccountId: string, providerId: string, note: string | null): Promise<{ usage: number | null }> {
+  const r = await call<{ usage?: number | null }>("POST", "/users/invite", {
     account_id: unipileAccountId,
     provider_id: providerId,
     ...(note ? { message: note } : {}),
   });
+  return { usage: typeof r.usage === "number" ? r.usage : null };
 }
 
 /**

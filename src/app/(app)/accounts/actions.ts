@@ -59,7 +59,7 @@ export async function setEnabled(formData: FormData) {
   await db
     .update(schema.accounts)
     // Switching on again clears a pause from the sending engine.
-    .set(enabled ? { enabled, pausedReason: null, consecutiveErrors: 0, nextActionAt: null } : { enabled })
+    .set(enabled ? { enabled, pausedReason: null, consecutiveErrors: 0, consecutiveRejects: 0, nextActionAt: null } : { enabled })
     .where(and(eq(schema.accounts.id, row.id)));
   await db.insert(schema.activityLog).values({
     accountId: row.id,

@@ -47,8 +47,8 @@ export function SalesNavForm({ accounts, maxPages }: { accounts: AccountOption[]
         <AccountSelect accounts={accounts} value={v.accountId} />
       </Field>
       <Field
-        label="Sales Navigator search URL"
-        hint="Run the search in Sales Navigator, then copy the whole address from the browser's address bar."
+        label="Sales Navigator search or lead list URL"
+        hint="Run the search (or open a saved lead list) in Sales Navigator, then copy the whole address from the browser's address bar."
       >
         <input
           name="url"

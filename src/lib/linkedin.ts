@@ -31,8 +31,9 @@ export function checkSalesNavUrl(input: string): string | null {
     return "That is not a valid web address.";
   }
   if (!/(^|\.)linkedin\.com$/.test(u.hostname)) return "The address must be on linkedin.com.";
-  if (!u.pathname.startsWith("/sales/search/people")) {
-    return "Paste the address of a Sales Navigator people search (it contains /sales/search/people).";
+  // Unipile accepts people searches and saved lead lists.
+  if (!u.pathname.startsWith("/sales/search/people") && !u.pathname.startsWith("/sales/lists/people")) {
+    return "Paste the address of a Sales Navigator people search or lead list (it contains /sales/search/people or /sales/lists/people).";
   }
   return null;
 }
@@ -94,7 +95,11 @@ export function leadFromSearchItem(item: Record<string, unknown>): LeadInput | n
     firstName = first;
     lastName = rest.join(" ");
   }
-  const publicIdentifier = clean(item.public_identifier)?.toLowerCase() ?? null;
+  // Sales Navigator results carry public_identifier; classic results only have it inside
+  // profile_url (https://www.linkedin.com/in/<slug>?miniProfileUrn=...).
+  const publicIdentifier =
+    clean(item.public_identifier)?.toLowerCase() ??
+    parseProfileUrl(clean(item.public_profile_url) ?? clean(item.profile_url)).publicIdentifier;
   const linkedinId = clean(item.id);
   if (!linkedinId && !publicIdentifier) return null;
   const lead = {
@@ -102,8 +107,8 @@ export function leadFromSearchItem(item: Record<string, unknown>): LeadInput | n
     publicIdentifier,
     profileUrl:
       clean(item.public_profile_url) ??
-      clean(item.profile_url) ??
-      (publicIdentifier ? `https://www.linkedin.com/in/${encodeURIComponent(publicIdentifier)}` : null),
+      (publicIdentifier ? `https://www.linkedin.com/in/${encodeURIComponent(publicIdentifier)}` : null) ??
+      clean(item.profile_url),
     firstName,
     lastName,
     headline: clean(item.headline),
