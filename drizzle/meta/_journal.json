@@ -29,6 +29,13 @@
       "when": 1794258128072,
       "tag": "0003_tired_jackpot",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1794258927252,
+      "tag": "0004_tiresome_slipstream",
+      "breakpoints": true
     }
   ]
 }

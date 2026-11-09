@@ -5,7 +5,23 @@ Self-hosted multi-account LinkedIn outreach tool. The plan is in
 [docs/sendroq-scrape.md](docs/sendroq-scrape.md) (used to understand the features only; all
 wording and design here are our own).
 
-## Status: Phases 1 to 3 done
+## Status: Phases 1 to 4 done
+
+Phase 4, Campaigns:
+
+- **Builder:** name, lead list, product, writing style, playbook (Curiosity, Plain ask,
+  Specific to them, Custom), the step list, sending accounts, active days and hours with a
+  timezone, and daily limits per account (capped at 15 connection requests and 40 messages)
+- **Steps:** a connection request (no note, or a template note for Sales Navigator accounts,
+  up to 300 characters), then 1 to 5 messages, each AI-drafted or a fixed template with
+  {first_name}, {last_name}, {company}, {title} and a fallback for missing values
+- **Readiness checks** before launch; **launch** enrolls the list's leads. Anyone already in
+  another campaign, or without a LinkedIn profile, is enrolled as skipped, under a database
+  lock so two launches cannot both claim a person.
+- After launch the lead list and sequence are fixed (duplicate to change them); name,
+  accounts, schedule and limits stay editable. Pause, resume, duplicate, delete, and exclude
+  individual leads.
+- **Nothing is sent yet.** The sending engine is Phase 5.
 
 Phase 3, Voice:
 
@@ -50,7 +66,9 @@ Phase 1:
   secret). A status other than Connected switches sending off for that account.
 - Docker, Docker Compose and Caddy files for the Hetzner deploy
 
-Not built yet: everything from Phase 4 (Campaigns) on. Accounts start at 5 invites and
+Not built yet: everything from Phase 5 (sending engine) on. Message drafting currently
+writes three messages (opener, follow-up, last note); Phase 6 extends it to every AI step
+in a campaign's sequence and adds the playbook brief to the prompt. Accounts start at 5 invites and
 20 messages a day; the Phase 5 sending engine will raise these during warm-up.
 
 ## Local development

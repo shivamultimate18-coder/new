@@ -1,6 +1,7 @@
 import {
   bigserial,
   boolean,
+  primaryKey,
   index,
   integer,
   jsonb,
@@ -250,9 +251,109 @@ export const aiUsage = pgTable(
   (t) => [index("ai_usage_at_idx").on(t.at)],
 );
 
+// ---------------------------------------------------------------------------
+// Campaigns (Phase 4)
+
+export const campaignStatus = pgEnum("campaign_status", ["draft", "running", "paused", "completed"]);
+
+export type SequenceStep = {
+  id: string;
+  type: "invite" | "message";
+  /** Days to wait after the previous step (for the first message: after the invite is accepted). */
+  waitDays: number;
+  /** invite: "blank" or "template". message: "ai" or "template". */
+  mode: "blank" | "ai" | "template";
+  /** Template text with {first_name}, {last_name}, {company}, {title}. */
+  template: string;
+  /** Sent instead of the template when a variable it uses is missing for a lead. */
+  fallback: string;
+};
+
+export const campaigns = pgTable("campaigns", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: text("name").notNull(),
+  status: campaignStatus("status").notNull().default("draft"),
+  productId: uuid("product_id").references(() => products.id, { onDelete: "set null" }),
+  writingStyleId: uuid("writing_style_id").references(() => writingStyles.id, { onDelete: "set null" }),
+  leadListId: uuid("lead_list_id").references(() => leadLists.id, { onDelete: "set null" }),
+  playbook: text("playbook").notNull().default("curiosity"),
+  steps: jsonb("steps").$type<SequenceStep[]>().notNull().default([]),
+  timezone: text("timezone").notNull().default("America/New_York"),
+  /** 0 = Sunday ... 6 = Saturday */
+  activeDays: jsonb("active_days").$type<number[]>().notNull().default([1, 2, 3, 4, 5]),
+  activeFrom: text("active_from").notNull().default("09:00"),
+  activeTo: text("active_to").notNull().default("17:00"),
+  dailyInviteLimit: integer("daily_invite_limit").notNull().default(10),
+  dailyMessageLimit: integer("daily_message_limit").notNull().default(20),
+  createdByUserId: uuid("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  launchedAt: timestamp("launched_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const campaignAccounts = pgTable(
+  "campaign_accounts",
+  {
+    campaignId: uuid("campaign_id")
+      .notNull()
+      .references(() => campaigns.id, { onDelete: "cascade" }),
+    accountId: uuid("account_id")
+      .notNull()
+      .references(() => accounts.id, { onDelete: "cascade" }),
+  },
+  (t) => [primaryKey({ columns: [t.campaignId, t.accountId] })],
+);
+
+/**
+ * pending      enrolled, not started
+ * active       somewhere in the sequence
+ * completed    every step done without a reply
+ * replied      the prospect replied; remaining steps cancelled
+ * failed       stopped by an error (see error)
+ * skipped      not contacted (already in another campaign, or no usable profile)
+ * excluded     removed by a person
+ */
+export const leadStateStatus = pgEnum("lead_state_status", [
+  "pending",
+  "active",
+  "completed",
+  "replied",
+  "failed",
+  "skipped",
+  "excluded",
+]);
+
+export const leadState = pgTable(
+  "lead_state",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    campaignId: uuid("campaign_id")
+      .notNull()
+      .references(() => campaigns.id, { onDelete: "cascade" }),
+    leadId: uuid("lead_id")
+      .notNull()
+      .references(() => leads.id, { onDelete: "cascade" }),
+    /** The one account that contacts this lead from invite to last message. */
+    accountId: uuid("account_id").references(() => accounts.id, { onDelete: "set null" }),
+    status: leadStateStatus("status").notNull().default("pending"),
+    /** Index of the next step to run in campaigns.steps. */
+    stepIndex: integer("step_index").notNull().default(0),
+    nextRunAt: timestamp("next_run_at", { withTimezone: true }),
+    lastActionAt: timestamp("last_action_at", { withTimezone: true }),
+    note: text("note"),
+    enrolledAt: timestamp("enrolled_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("lead_state_campaign_lead_idx").on(t.campaignId, t.leadId),
+    index("lead_state_due_idx").on(t.status, t.nextRunAt),
+    index("lead_state_campaign_status_idx").on(t.campaignId, t.status),
+  ],
+);
+
 export type User = typeof users.$inferSelect;
 export type Account = typeof accounts.$inferSelect;
 export type LeadList = typeof leadLists.$inferSelect;
 export type Lead = typeof leads.$inferSelect;
 export type Product = typeof products.$inferSelect;
 export type WritingStyle = typeof writingStyles.$inferSelect;
+export type Campaign = typeof campaigns.$inferSelect;
