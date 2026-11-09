@@ -6,24 +6,10 @@ import { db, schema } from "@/db";
 import type { RuleSet } from "@/db/schema";
 import { friendlyAiError } from "@/lib/ai";
 import { requireUser } from "@/lib/auth";
-import { generateDrafts, messageSteps } from "@/lib/drafting";
+import { generateDrafts, messageSteps, releaseIfApproved } from "@/lib/drafting";
 import { checkMessage, proposeRules } from "@/lib/voice/compose";
 
 const isId = (x: string) => /^[0-9a-f-]{36}$/i.test(x);
-
-/** A lead the engine is holding for approval goes as soon as its current step is approved. */
-async function releaseIfApproved(leadStateId: string) {
-  const [s] = await db.select().from(schema.leadState).where(eq(schema.leadState.id, leadStateId));
-  if (!s || s.waiting !== "approval") return;
-  const [ok] = await db
-    .select({ id: schema.messageDrafts.id })
-    .from(schema.messageDrafts)
-    .where(and(eq(schema.messageDrafts.leadStateId, s.id), eq(schema.messageDrafts.stepIndex, s.stepIndex), eq(schema.messageDrafts.status, "approved")))
-    .limit(1);
-  if (ok) {
-    await db.update(schema.leadState).set({ waiting: null, nextRunAt: new Date(), note: "Approved. Sending at the next opportunity" }).where(eq(schema.leadState.id, s.id));
-  }
-}
 
 /** Approves every unsent draft of the given leads. */
 export async function approveLeads(fd: FormData) {

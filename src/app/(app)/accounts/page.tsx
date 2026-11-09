@@ -228,7 +228,7 @@ export default async function AccountsPage({ searchParams }: PageProps<"/account
                     <form action={removeAccount} className="ml-auto">
                       <input type="hidden" name="id" value={a.id} />
                       <ConfirmButton
-                        message={`Remove ${a.name || "this account"}? It will be disconnected from Unipile.`}
+                        message={`Remove ${a.name || "this account"}? It will be disconnected from Unipile, and leads it is part-way through messaging will stop.`}
                         className="btn btn-danger"
                       >
                         Remove

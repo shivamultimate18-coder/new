@@ -93,6 +93,16 @@ export async function removeAccount(formData: FormData) {
       redirect("/accounts?error=remove");
     }
   }
+  // Leads this account was handling cannot move to another account mid-conversation (the
+  // chat belongs to it), so they end here; invites it had not sent go back to the pool.
+  await db
+    .update(schema.leadState)
+    .set({ status: "failed", waiting: null, nextRunAt: null, note: "The sending account was removed" })
+    .where(and(eq(schema.leadState.accountId, row.id), eq(schema.leadState.status, "active")));
+  await db
+    .update(schema.leadState)
+    .set({ accountId: null, inviteSentAt: null, lockedUntil: null, note: null })
+    .where(and(eq(schema.leadState.accountId, row.id), eq(schema.leadState.status, "pending")));
   await db.delete(schema.accounts).where(eq(schema.accounts.id, row.id));
   revalidatePath("/accounts");
 }

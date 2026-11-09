@@ -2,6 +2,7 @@ import { and, asc, eq, gte, inArray, isNull, lt, lte, or, sql } from "drizzle-or
 import { db, schema } from "@/db";
 import type { Account, Campaign, Lead } from "@/db/schema";
 import { renderTemplate } from "../campaigns/template";
+import { AiBudgetError, assertAiBudget } from "../budget";
 import { hasAiSteps } from "../drafting";
 import { recordMessage, upsertConversation } from "../inbox";
 import { isSuppressed } from "../suppression";
@@ -137,12 +138,13 @@ async function advance(leadStateId: string, c: Campaign, fromIndex: number, extr
 // ---------------------------------------------------------------------------
 // Errors
 
-type ErrorKind = "lead" | "account" | "transient" | "already-invited";
+type ErrorKind = "lead" | "account" | "transient" | "already-invited" | "already-connected";
 
 export function classifyError(e: unknown): ErrorKind {
   if (!(e instanceof UnipileError)) return "transient";
   const t = e.type.toLowerCase();
-  if (/already_invited|cannot_resend|invitation_pending|already_connected/.test(t)) return "already-invited";
+  if (/already_connected|first_degree/.test(t)) return "already-connected";
+  if (/already_invited|cannot_resend|invitation_pending/.test(t)) return "already-invited";
   if (e.status === 401 || e.status === 403 || e.status === 429) return "account";
   if (/disconnected|credential|checkpoint|captcha|restricted|limit|quota|too_many|banned|suspended/.test(t)) return "account";
   if (e.status === 404 || /not_found|cannot_be_reached|not_allowed|invalid_recipient|blocked|unprocessable/.test(t)) return "lead";
@@ -293,8 +295,15 @@ async function doMessage(ctx: Ctx): Promise<boolean> {
         return false;
       }
     } else {
+      // Only messages after the connection was made count: an existing chat can hold older
+      // history from the prospect that is not a reply to this campaign.
+      const since = (s.acceptedAt ?? s.inviteSentAt ?? s.enrolledAt).getTime();
       const recent = await recentChatMessages(s.chatId);
-      const theirs = recent.filter((m) => m.fromProspect);
+      const theirs = recent.filter((m) => {
+        if (!m.fromProspect) return false;
+        const at = Date.parse(m.at);
+        return Number.isNaN(at) || at > since; // an undated message is treated as a reply, to be safe
+      });
       if (theirs.length) {
         // Store what the webhook missed, then stop the sequence.
         for (const m of theirs) await handleIncomingMessage(a.unipileAccountId!, s.chatId, lead.providerId, { text: m.text, externalId: m.id, at: m.at, fromAccount: false });
@@ -335,9 +344,10 @@ async function doMessage(ctx: Ctx): Promise<boolean> {
   }
 
   const providerId = lead.providerId ?? (await ensureProfile(ctx)).providerId;
-  const chatId = MOCK()
-    ? (s.chatId ?? `mockchat-${s.id}`)
+  const sent = MOCK()
+    ? { chatId: s.chatId ?? `mockchat-${s.id}`, messageId: `mockmsg-${s.id}-${s.stepIndex}` }
     : await sendMessage({ unipileAccountId: a.unipileAccountId!, providerId, chatId: s.chatId, text });
+  const chatId = sent.chatId;
   await log(a.id, "message.sent", { campaignId: c.id, leadStateId: s.id, step: s.stepIndex });
   try {
     const conv = await upsertConversation({
@@ -350,7 +360,7 @@ async function doMessage(ctx: Ctx): Promise<boolean> {
       prospectHeadline: lead.headline,
       prospectProfileUrl: lead.profileUrl,
     });
-    await recordMessage(conv, { direction: "out", body: text, source: "campaign" });
+    await recordMessage(conv, { direction: "out", body: text, source: "campaign", externalId: sent.messageId });
   } catch (e) {
     // The message went out; failing to file it in the inbox must not resend it.
     console.error(`[engine] sent but could not store message for ${s.id}:`, e);
@@ -476,6 +486,11 @@ export async function processAccount(a: Account): Promise<"acted" | "idle" | "ou
       if (kind === "already-invited" && row.s.status === "pending") {
         await log(a.id, "invite.sent", { campaignId: c.id, leadStateId: row.s.id, alreadyPending: true });
         await release(row.s.id, { status: "active", stepIndex: 1, waiting: "acceptance", inviteSentAt: new Date(), note: "Invite already pending. Waiting for acceptance" });
+      } else if (kind === "already-connected" && row.s.status === "pending") {
+        // The lookup was stale: treat as connected and go straight to the first message.
+        const at = new Date(Date.now() + (c.steps[1]?.waitDays ?? 0) * dayMs());
+        await release(row.s.id, { status: "active", stepIndex: 1, inviteSentAt: null, acceptedAt: new Date(), waiting: null, nextRunAt: at, note: "Already connected. Skipped the invite" });
+        if (hasAiSteps(c)) await requestDrafts(row.s.id);
       } else if (kind === "lead") {
         await release(row.s.id, { status: "failed", note: `LinkedIn refused this lead: ${shortError(e).slice(0, 120)}` });
       } else if (kind === "account") {
@@ -584,7 +599,16 @@ export async function handleIncomingMessage(
   const match = byChat[0] ?? bySender[0];
 
   // Our own messages (sent from LinkedIn directly) also arrive here.
-  const fromProspect = m.fromAccount === true ? false : m.fromAccount === false ? true : match ? senderProviderId === match.lead.providerId : true;
+  const fromProspect =
+    m.fromAccount === true
+      ? false
+      : m.fromAccount === false
+        ? true
+        : a.providerId && senderProviderId
+          ? senderProviderId !== a.providerId
+          : match
+            ? senderProviderId === match.lead.providerId
+            : true;
 
   const conv = await upsertConversation({
     accountId: a.id,
@@ -605,7 +629,41 @@ export async function handleIncomingMessage(
   }
 }
 
+let lastDraftRetry = 0;
+
+/**
+ * Leads held for approval whose drafting failed (no API key yet, budget used up, a refusal)
+ * are asked again every 30 minutes, once the AI budget allows it.
+ */
+async function retryFailedDrafting() {
+  if (Date.now() - lastDraftRetry < 30 * 60_000) return;
+  lastDraftRetry = Date.now();
+  try {
+    await assertAiBudget();
+  } catch (e) {
+    if (e instanceof AiBudgetError) return;
+    throw e;
+  }
+  const stuck = await db
+    .select({ id: schema.leadState.id })
+    .from(schema.leadState)
+    .where(
+      and(
+        eq(schema.leadState.status, "active"),
+        eq(schema.leadState.waiting, "approval"),
+        sql`${schema.leadState.draftError} is not null`,
+        sql`not exists (select 1 from message_drafts d where d.lead_state_id = ${schema.leadState.id} and d.step_index = ${schema.leadState.stepIndex} and d.status in ('drafted','approved'))`,
+      ),
+    )
+    .limit(200);
+  for (const r of stuck) {
+    await db.update(schema.leadState).set({ draftError: null, note: "Drafting messages" }).where(eq(schema.leadState.id, r.id));
+    await requestDrafts(r.id);
+  }
+}
+
 async function housekeeping() {
+  await retryFailedDrafting();
   // Invites nobody accepted.
   await db
     .update(schema.leadState)

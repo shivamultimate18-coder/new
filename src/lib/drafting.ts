@@ -34,6 +34,26 @@ export function prospectOf(lead: Lead): Prospect {
 
 const UNSENT = ["drafted", "approved"] as const;
 
+/**
+ * A lead the engine is holding for approval goes as soon as its current step has an approved
+ * draft. Re-reads the lead, so it is safe to call after any change, from anywhere.
+ */
+export async function releaseIfApproved(leadStateId: string) {
+  const [s] = await db.select().from(schema.leadState).where(eq(schema.leadState.id, leadStateId));
+  if (!s || s.waiting !== "approval") return false;
+  const [ok] = await db
+    .select({ id: schema.messageDrafts.id })
+    .from(schema.messageDrafts)
+    .where(and(eq(schema.messageDrafts.leadStateId, s.id), eq(schema.messageDrafts.stepIndex, s.stepIndex), eq(schema.messageDrafts.status, "approved")))
+    .limit(1);
+  if (!ok) return false;
+  await db
+    .update(schema.leadState)
+    .set({ waiting: null, nextRunAt: new Date(), note: "Approved. Sending at the next opportunity" })
+    .where(and(eq(schema.leadState.id, s.id), eq(schema.leadState.waiting, "approval")));
+  return true;
+}
+
 export type DraftOutcome = "drafted" | "exists" | "nothing" | "busy" | "skipped" | "error";
 
 /**
@@ -93,7 +113,11 @@ async function draftLocked(
     });
     const toWrite = plan.filter((m) => m.kind === "write");
     if (!toWrite.length) return "nothing";
-    if (!opts.regenerate && toWrite.every((m) => unsentAt(m.stepIndex))) return "exists";
+    if (!opts.regenerate && toWrite.every((m) => unsentAt(m.stepIndex))) {
+      // The engine may have put the lead on hold after these drafts were approved.
+      await releaseIfApproved(s.id);
+      return "exists";
+    }
 
     let result;
     try {
@@ -146,12 +170,12 @@ async function draftLocked(
           angle: result.angle,
           draftedAt: now,
           draftError: null,
-          // A lead the engine was holding for approval can go as soon as everything is approved.
-          ...(allApproved && s.waiting === "approval" ? { waiting: null, nextRunAt: now, note: "Drafts approved automatically" } : {}),
           ...(!allApproved && s.waiting === "approval" ? { note: "Drafts ready for review" } : {}),
         })
         .where(eq(schema.leadState.id, s.id));
     });
+    // Re-reads the lead: the engine may have put it on hold while Claude was writing.
+    if (allApproved) await releaseIfApproved(s.id);
     return "drafted";
   }
 }

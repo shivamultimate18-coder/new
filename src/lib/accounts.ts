@@ -24,6 +24,7 @@ export async function completeConnection(rowId: string, unipileAccountId: string
         ? {
             name: profile.name || row.name,
             publicIdentifier: profile.publicIdentifier,
+            providerId: profile.providerId,
             // Only ever switch the flag on automatically; a person can correct it by hand.
             hasSalesNav: row.hasSalesNav || profile.hasSalesNav,
           }

@@ -85,6 +85,8 @@ export async function createHostedAuthLink(opts: {
 
 export type UnipileProfile = {
   name: string;
+  /** The account's own LinkedIn member id. */
+  providerId: string | null;
   publicIdentifier: string | null;
   hasSalesNav: boolean;
 };
@@ -93,18 +95,19 @@ type UnipileAccount = {
   id: string;
   name?: string;
   connection_params?: {
-    im?: { publicIdentifier?: string; username?: string; premiumFeatures?: string[] };
+    im?: { id?: string; publicIdentifier?: string; username?: string; premiumFeatures?: string[] };
   };
 };
 
 export async function getAccountProfile(unipileAccountId: string): Promise<UnipileProfile> {
   if (env.UNIPILE_MOCK) {
-    return { name: "Mock account", publicIdentifier: "mock-account", hasSalesNav: false };
+    return { name: "Mock account", providerId: `MOCKSELF-${unipileAccountId}`, publicIdentifier: "mock-account", hasSalesNav: false };
   }
   const a = await call<UnipileAccount>("GET", `/accounts/${encodeURIComponent(unipileAccountId)}`);
   const im = a.connection_params?.im;
   return {
     name: a.name ?? im?.username ?? "",
+    providerId: im?.id ?? null,
     publicIdentifier: im?.publicIdentifier ?? null,
     hasSalesNav: (im?.premiumFeatures ?? []).some((f) => /sales[_ ]?nav/i.test(f)),
   };
@@ -240,23 +243,26 @@ export async function sendInvite(unipileAccountId: string, providerId: string, n
   });
 }
 
-/** Starts a chat with a first message, or adds to the existing one. Returns the chat id. */
+/**
+ * Starts a chat with a first message, or adds to the existing one. Returns the chat id and
+ * Unipile's message id, which is stored so webhook echoes and Sync do not duplicate it.
+ */
 export async function sendMessage(opts: {
   unipileAccountId: string;
   providerId: string;
   chatId: string | null;
   text: string;
-}): Promise<string> {
+}): Promise<{ chatId: string; messageId: string | null }> {
   const form = new FormData();
   form.set("text", opts.text);
   if (opts.chatId) {
-    await call("POST", `/chats/${encodeURIComponent(opts.chatId)}/messages`, form);
-    return opts.chatId;
+    const r = await call<{ message_id?: string | null }>("POST", `/chats/${encodeURIComponent(opts.chatId)}/messages`, form);
+    return { chatId: opts.chatId, messageId: r.message_id ?? null };
   }
   form.set("account_id", opts.unipileAccountId);
   form.append("attendees_ids", opts.providerId);
-  const r = await call<{ chat_id: string }>("POST", "/chats", form);
-  return r.chat_id;
+  const r = await call<{ chat_id: string; message_id?: string | null }>("POST", "/chats", form);
+  return { chatId: r.chat_id, messageId: r.message_id ?? null };
 }
 
 export type ChatMessage = { id: string; text: string; fromProspect: boolean; at: string };

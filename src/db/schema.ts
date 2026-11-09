@@ -50,6 +50,8 @@ export const accounts = pgTable(
     ownerUserId: uuid("owner_user_id").references(() => users.id, { onDelete: "set null" }),
     name: text("name").notNull().default(""),
     publicIdentifier: text("public_identifier"),
+    /** The account's own LinkedIn member id, to tell its messages from the prospect's. */
+    providerId: text("provider_id"),
     status: accountStatus("status").notNull().default("pending"),
     // The on/off switch. Sending requires enabled AND status = ok.
     enabled: boolean("enabled").notNull().default(false),

@@ -74,7 +74,16 @@ export async function upsertConversation(v: {
 /** Stores one message. Returns false if it was already stored (same Unipile message id). */
 export async function recordMessage(
   conv: Conversation,
-  m: { direction: "in" | "out"; body: string; source: "campaign" | "inbox" | "linkedin"; externalId?: string | null; sentAt?: Date; userId?: string | null },
+  m: {
+    direction: "in" | "out";
+    body: string;
+    source: "campaign" | "inbox" | "linkedin";
+    externalId?: string | null;
+    sentAt?: Date;
+    userId?: string | null;
+    /** false for old history found by Sync: stored, but not marked unread or re-labelled. */
+    notify?: boolean;
+  },
 ): Promise<boolean> {
   const sentAt = m.sentAt && !Number.isNaN(m.sentAt.getTime()) ? m.sentAt : new Date();
   const [inserted] = await db
@@ -92,11 +101,11 @@ export async function recordMessage(
       lastMessageAt: sql`greatest(${schema.conversations.lastMessageAt}, ${at})`,
       lastMessagePreview: sql`case when ${schema.conversations.lastMessageAt} is null or ${schema.conversations.lastMessageAt} <= ${at} then ${m.body.slice(0, 200)} else ${schema.conversations.lastMessagePreview} end`,
       lastFromProspect: sql`case when ${schema.conversations.lastMessageAt} is null or ${schema.conversations.lastMessageAt} <= ${at} then ${m.direction === "in"} else ${schema.conversations.lastFromProspect} end`,
-      ...(m.direction === "in" ? { unread: true } : {}),
+      ...(m.direction === "in" && m.notify !== false ? { unread: true } : {}),
     })
     .where(eq(schema.conversations.id, conv.id));
   // Intent is re-scored only when the prospect writes (plan section 2).
-  if (m.direction === "in" && conv.intentSource !== "manual") {
+  if (m.direction === "in" && m.notify !== false && conv.intentSource !== "manual") {
     try {
       await enqueueClassify(conv.id);
     } catch (e) {
@@ -243,10 +252,10 @@ export async function suggestReply(conversationId: string, userId: string): Prom
 
 /** Sends a teammate's reply from the account that owns the conversation. */
 export async function sendReply(conv: Conversation, account: Account, text: string, userId: string) {
-  if (!env.UNIPILE_MOCK) {
-    await sendMessage({ unipileAccountId: account.unipileAccountId!, providerId: conv.prospectProviderId ?? "", chatId: conv.chatId, text });
-  }
-  await recordMessage(conv, { direction: "out", body: text, source: "inbox", userId });
+  const sent = env.UNIPILE_MOCK
+    ? { messageId: null }
+    : await sendMessage({ unipileAccountId: account.unipileAccountId!, providerId: conv.prospectProviderId ?? "", chatId: conv.chatId, text });
+  await recordMessage(conv, { direction: "out", body: text, source: "inbox", userId, externalId: sent.messageId });
   // Counts toward the account's daily activity, so the engine sends a little less that day.
   await db.insert(schema.activityLog).values({ accountId: account.id, userId, type: "message.sent", detail: { manual: true, conversationId: conv.id } });
   await db.update(schema.accounts).set({ lastActivityAt: new Date() }).where(eq(schema.accounts.id, account.id));
@@ -277,9 +286,14 @@ export async function syncAccount(account: Account): Promise<number> {
       prospectHeadline: lead?.l.headline,
       prospectProfileUrl: lead?.l.profileUrl,
     });
+    // Old history is stored quietly; only messages newer than what we had (or from the last
+    // 3 days, for a chat we have never seen) are marked unread and labelled.
+    const known = conv.lastMessageAt?.getTime() ?? Date.now() - 3 * 24 * 3600 * 1000;
     for (const m of (await recentChatMessages(chat.id, 20)).reverse()) {
       if (!m.text.trim()) continue;
-      if (await recordMessage(conv, { direction: m.fromProspect ? "in" : "out", body: m.text, source: "linkedin", externalId: m.id, sentAt: new Date(m.at) })) added++;
+      const at = new Date(m.at);
+      const notify = !Number.isNaN(at.getTime()) && at.getTime() > known;
+      if (await recordMessage(conv, { direction: m.fromProspect ? "in" : "out", body: m.text, source: "linkedin", externalId: m.id, sentAt: at, notify })) added++;
     }
   }
   return added;
