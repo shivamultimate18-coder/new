@@ -16,8 +16,11 @@ const NAV: { group: string; items: { label: string; href?: string }[] }[] = [
     group: "Settings",
     items: [
       { label: "Accounts", href: "/accounts" },
+      { label: "Account health", href: "/accounts/health" },
       { label: "Team", href: "/settings/team" },
       { label: "Tags", href: "/settings/tags" },
+      { label: "Do not contact", href: "/settings/do-not-contact" },
+      { label: "AI usage", href: "/settings/usage" },
     ],
   },
 ];
@@ -36,7 +39,7 @@ export default async function AppLayout({ children }: LayoutProps<"/">) {
                   {g.group}
                 </div>
               )}
-              <div className="flex md:block">
+              <div className="flex flex-wrap md:block">
                 {g.items.map((item) =>
                   item.href ? (
                     <NavLink key={item.label} href={item.href} label={item.label} />

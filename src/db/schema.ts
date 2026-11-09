@@ -493,6 +493,41 @@ export const conversationTags = pgTable(
   (t) => [primaryKey({ columns: [t.conversationId, t.tagId] })],
 );
 
+// ---------------------------------------------------------------------------
+// Hardening (Phase 9)
+
+/**
+ * People nobody on the team may contact. Matched on any LinkedIn identifier we hold.
+ * Entries from a deletion request keep only the identifiers, so the person is never
+ * imported again but nothing else about them is stored.
+ */
+export const suppressionList = pgTable(
+  "suppression_list",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    linkedinId: text("linkedin_id"),
+    publicIdentifier: text("public_identifier"),
+    providerId: text("provider_id"),
+    /** Shown in the list; empty for deletion requests. */
+    label: text("label").notNull().default(""),
+    reason: text("reason").notNull(),
+    createdByUserId: uuid("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("suppression_linkedin_idx").on(t.linkedinId),
+    index("suppression_public_idx").on(t.publicIdentifier),
+    index("suppression_provider_idx").on(t.providerId),
+  ],
+);
+
+/** Team-wide settings, one row per key. */
+export const appSettings = pgTable("app_settings", {
+  key: text("key").primaryKey(),
+  value: jsonb("value").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 export type User = typeof users.$inferSelect;
 export type Account = typeof accounts.$inferSelect;
 export type LeadList = typeof leadLists.$inferSelect;

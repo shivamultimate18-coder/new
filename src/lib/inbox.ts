@@ -7,6 +7,7 @@ import { db, schema } from "@/db";
 import type { Account, Conversation, Intent } from "@/db/schema";
 import { INTENTS } from "@/db/schema";
 import { AiOutputError, MODELS, getClient, recordUsage } from "./ai";
+import { AiBudgetError, assertAiBudget } from "./budget";
 import { env } from "./env";
 import { enqueueClassify } from "./queue";
 import { recentChatMessages, recentChats, sendMessage } from "./unipile";
@@ -148,6 +149,12 @@ export async function classifyConversation(conversationId: string): Promise<"lab
   if (env.AI_MOCK) {
     result = mockIntent([...thread].reverse().find((m) => m.direction === "in")!.body);
   } else {
+    try {
+      await assertAiBudget();
+    } catch (e) {
+      if (e instanceof AiBudgetError) return "skipped"; // keep the current label until there is budget
+      throw e;
+    }
     const client = getClient();
     const response = await client.messages.parse({
       model: MODELS.light,
@@ -208,6 +215,7 @@ export async function suggestReply(conversationId: string, userId: string): Prom
         .join("\n")
     : "No product details available.";
   const rules = row.st ? [...row.st.rules.do.map((r) => `Do: ${r}`), ...row.st.rules.dont.map((r) => `Don't: ${r}`)].join("\n") : "";
+  await assertAiBudget();
   const client = getClient();
   const response = await client.messages.create({
     model: MODELS.light,

@@ -12,7 +12,8 @@
     "user:create": "tsx --env-file-if-exists=.env scripts/create-user.ts",
     "webhooks:register": "tsx --env-file-if-exists=.env --conditions=react-server scripts/register-webhooks.ts",
     "typecheck": "tsc --noEmit",
-    "worker": "tsx --env-file-if-exists=.env --conditions=react-server scripts/worker.ts"
+    "worker": "tsx --env-file-if-exists=.env --conditions=react-server scripts/worker.ts",
+    "load-test": "tsx --env-file-if-exists=.env --conditions=react-server scripts/load-test.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.7.0",

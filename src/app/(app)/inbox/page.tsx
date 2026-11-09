@@ -8,6 +8,8 @@ import type { Intent } from "@/db/schema";
 import { requireUser } from "@/lib/auth";
 import { INTENT_LABEL } from "@/lib/inbox";
 import { tagClass } from "@/lib/tag-colors";
+import { ConfirmButton } from "@/components/confirm-button";
+import { doNotContactConversation } from "../settings/actions";
 import { markUnread, setIntent, toggleTag } from "./actions";
 import { MarkRead, ReplyBox, SyncButton } from "./inbox-client";
 
@@ -240,10 +242,18 @@ async function Thread(props: {
               {conv.prospectProfileUrl && <a href={conv.prospectProfileUrl} target="_blank" rel="noreferrer" className="text-brand hover:underline">LinkedIn profile</a>}
             </div>
           </div>
-          <form action={markUnread}>
-            <input type="hidden" name="id" value={conv.id} />
-            <button type="submit" className="btn btn-secondary px-2.5 py-1 text-xs">Mark unread</button>
-          </form>
+          <div className="flex flex-wrap gap-2">
+            <form action={markUnread}>
+              <input type="hidden" name="id" value={conv.id} />
+              <button type="submit" className="btn btn-secondary px-2.5 py-1 text-xs">Mark unread</button>
+            </form>
+            <form action={doNotContactConversation}>
+              <input type="hidden" name="id" value={conv.id} />
+              <ConfirmButton message={`Add ${name} to the do-not-contact list? No campaign will message them again.`} className="btn btn-danger px-2.5 py-1 text-xs">
+                Do not contact
+              </ConfirmButton>
+            </form>
+          </div>
         </div>
         <form action={setIntent} className="flex flex-wrap items-center gap-2">
           <input type="hidden" name="id" value={conv.id} />

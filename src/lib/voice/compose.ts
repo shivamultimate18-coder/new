@@ -5,6 +5,7 @@ import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { z } from "zod";
 import type { DraftSequence, Product, RuleSet } from "@/db/schema";
 import { AiOutputError, FALLBACK_BETA, MODELS, getClient, recordUsage } from "../ai";
+import { assertAiBudget } from "../budget";
 import { env } from "../env";
 
 export type Prospect = {
@@ -208,6 +209,7 @@ export async function draftMessages(opts: {
     .filter(Boolean)
     .join("\n\n");
 
+  await assertAiBudget();
   const client = getClient();
   const messages: Anthropic.Beta.BetaMessageParam[] = [{ role: "user", content: userContent }];
   for (let attempt = 0; attempt < 2; attempt++) {
@@ -284,6 +286,7 @@ export async function proposeRules(opts: {
   if (env.AI_MOCK) {
     return { do: [`Apply this feedback: ${opts.feedback[0]?.feedback ?? ""}`.slice(0, 160)], dont: [] };
   }
+  await assertAiBudget();
   const client = getClient();
   const response = await client.messages.parse({
     model: MODELS.light,
@@ -318,6 +321,7 @@ export async function draftIcp(product: Product, userId: string | null): Promise
   if (env.AI_MOCK) {
     return `Owners and founders of small and mid-sized companies that need ${product.name || "this"}.\nTitles: Founder, CEO, Owner, Head of Operations.\nSignals: hiring, recent growth, expanding to new locations.`;
   }
+  await assertAiBudget();
   const client = getClient();
   const response = await client.messages.create({
     model: MODELS.light,

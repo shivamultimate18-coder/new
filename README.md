@@ -5,7 +5,32 @@ Self-hosted multi-account LinkedIn outreach tool. The plan is in
 [docs/sendroq-scrape.md](docs/sendroq-scrape.md) (used to understand the features only; all
 wording and design here are our own).
 
-## Status: Phases 1 to 8 done
+## Status: Phases 1 to 9 done
+
+Phase 9, hardening for 100 accounts:
+
+- **Do not contact** (Settings): a team-wide list matched on any LinkedIn identifier
+  (member id, Sales Navigator id, profile slug). Checked at import, at enrollment, before
+  every invite and before every message; adding someone stops them in every running
+  campaign. Add by pasting links, or with "Do not contact" on an Inbox conversation.
+- **Duplicates across formats:** the profile lookup before an invite reveals the real
+  member id; the engine then checks, under a lock on that id, that no other campaign or
+  list has contacted the person, so the same person imported as a Sales Navigator id and
+  as a profile slug is invited once.
+- **Privacy deletion** (admins, Settings > Do not contact): removes a person's leads,
+  campaign progress, drafts, conversations and messages, keeping only their LinkedIn
+  identifiers on the do-not-contact list so they are not imported again.
+- **AI spend cap** (Settings > AI usage): admins set a monthly limit; spend is estimated
+  from stored token counts at list prices. Every Claude call checks it first; at the limit,
+  drafting, labels and suggested replies pause with a clear message, and Home warns from 80%.
+- **Account health** (Accounts > Account health): every account with its status, rolling
+  24-hour and 7-day usage against each limit, 14-day acceptance rate, queue and problems,
+  problem accounts first. Low acceptance (under 15% of 20+ invites) is flagged as an early
+  sign of LinkedIn limiting the account.
+- **Load test** (`npm run load-test`, throwaway database only): 100 mock accounts, 5,200
+  leads (200 duplicated in another format), two overlapping campaigns, do-not-contact
+  entries before and during the run, two engine loops at once. It checks every safety
+  rule; see "Load test" below.
 
 Phase 8, Home and campaign analytics (`src/lib/analytics.ts`, `src/components/performance.tsx`):
 
@@ -145,7 +170,7 @@ Phase 1:
   secret). A status other than Connected switches sending off for that account.
 - Docker, Docker Compose and Caddy files for the Hetzner deploy
 
-Not built yet: Phase 9 (100-account hardening) and the Phase 10 pilot.
+Not built yet: the Phase 10 pilot, which needs real Unipile and Anthropic keys.
 
 ## Local development
 
@@ -175,6 +200,22 @@ then reloads the page in a loop. Stop the dev server, build, then delete `.next`
 starting it again.
 
 Schema changes: edit `src/db/schema.ts`, then `npm run db:generate` and `npm run db:migrate`.
+
+## Load test
+
+```bash
+createdb outreach_load
+DATABASE_URL=postgres://outreach:outreach@localhost:5432/outreach_load npm run db:migrate
+DATABASE_URL=postgres://outreach:outreach@localhost:5432/outreach_load npm run load-test
+```
+
+It refuses to run on a database whose name does not contain "load", because it deletes
+everything. Last run (4 minutes, mock day of 120 seconds): 1,782 invites and 1,729 messages
+from 100 accounts; an engine pass took 131 ms median and 1 s at most; the lock skipped 649
+overlapping passes from the second loop; all ten safety checks passed (limits, one account
+per lead, accounts belong to the campaign, nobody invited twice, all 200 cross-format
+duplicates caught, nobody contacted after joining the do-not-contact list, no message after
+a reply, no leads left locked).
 
 ## Going live (Phase 1 parts of plan section 7)
 

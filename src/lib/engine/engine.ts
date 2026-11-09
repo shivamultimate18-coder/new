@@ -4,6 +4,7 @@ import type { Account, Campaign, Lead } from "@/db/schema";
 import { renderTemplate } from "../campaigns/template";
 import { hasAiSteps } from "../drafting";
 import { recordMessage, upsertConversation } from "../inbox";
+import { isSuppressed } from "../suppression";
 import { enqueueDraft } from "../queue";
 import { env } from "../env";
 import {
@@ -200,7 +201,10 @@ async function ensureProfile({ a, lead, c, s }: Ctx) {
   if (!identifier) throw new UnipileError(404, "errors/no_identifier", "Lead has no LinkedIn identifier");
   const p = MOCK() ? mock.profile(lead) : await getProfile(a.unipileAccountId!, identifier);
   await log(a.id, "profile.lookup", { campaignId: c.id, leadStateId: s.id });
-  await db.update(schema.leads).set({ providerId: p.providerId, profile: p.details }).where(eq(schema.leads.id, lead.id));
+  await db
+    .update(schema.leads)
+    .set({ providerId: p.providerId, profile: p.details, ...(!lead.publicIdentifier && p.publicIdentifier ? { publicIdentifier: p.publicIdentifier.toLowerCase() } : {}) })
+    .where(eq(schema.leads.id, lead.id));
   return p;
 }
 
@@ -209,6 +213,40 @@ async function doInvite(ctx: Ctx): Promise<boolean> {
   const { a, c, s, lead } = ctx;
   const profile = await ensureProfile(ctx);
   const base = { inviteSentAt: new Date(), lastActionAt: new Date(), stepIndex: 1, status: "active" as const };
+
+  // The lookup gives the real member id, which catches the same person imported in another
+  // format (Sales Navigator id, profile slug, CSV) after enrollment.
+  if (await isSuppressed({ linkedinId: lead.linkedinId, publicIdentifier: lead.publicIdentifier ?? profile.publicIdentifier, providerId: profile.providerId })) {
+    await release(s.id, { status: "skipped", note: "On the do-not-contact list" });
+    return true;
+  }
+  // Check and claim in one locked step, so two accounts can never both invite this person.
+  const claimed = await db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${"invite:" + profile.providerId}))`);
+    const [other] = await tx
+      .select({ id: schema.leadState.id })
+      .from(schema.leadState)
+      .innerJoin(schema.leads, eq(schema.leads.id, schema.leadState.leadId))
+      .where(
+        and(
+          eq(schema.leads.providerId, profile.providerId),
+          sql`${schema.leadState.id} <> ${s.id}`,
+          or(
+            sql`${schema.leadState.inviteSentAt} is not null`,
+            sql`${schema.leadState.acceptedAt} is not null`,
+            inArray(schema.leadState.status, ["active", "completed", "replied"]),
+          ),
+        ),
+      )
+      .limit(1);
+    if (other) return false;
+    await tx.update(schema.leadState).set({ inviteSentAt: new Date() }).where(eq(schema.leadState.id, s.id));
+    return true;
+  });
+  if (!claimed) {
+    await release(s.id, { status: "skipped", note: "Already contacted by another campaign" });
+    return true;
+  }
 
   if (profile.networkDistance === "FIRST_DEGREE") {
     const step = c.steps[1];
@@ -239,6 +277,10 @@ async function doMessage(ctx: Ctx): Promise<boolean> {
   const step = c.steps[s.stepIndex];
   if (!step) {
     await release(s.id, { status: "completed", nextRunAt: null, note: "Sequence finished" });
+    return false;
+  }
+  if (await isSuppressed({ linkedinId: lead.linkedinId, publicIdentifier: lead.publicIdentifier, providerId: lead.providerId })) {
+    await release(s.id, { status: "excluded", nextRunAt: null, waiting: null, note: "On the do-not-contact list" });
     return false;
   }
 
@@ -439,11 +481,11 @@ export async function processAccount(a: Account): Promise<"acted" | "idle" | "ou
       } else if (kind === "account") {
         // Keep the lead on this account: if the lead itself somehow causes the error,
         // handing it on would pause every account in turn. It waits for this account.
-        await release(row.s.id, { note: "Waiting: the sending account was paused" });
+        await release(row.s.id, { note: "Waiting: the sending account was paused", ...(row.s.status === "pending" ? { inviteSentAt: null } : {}) });
         await pauseAccount(a, `LinkedIn or Unipile reported a problem: ${shortError(e).slice(0, 160)}`);
         return "acted";
       } else {
-        await release(row.s.id, row.s.status === "pending" ? { accountId: null } : {});
+        await release(row.s.id, row.s.status === "pending" ? { accountId: null, inviteSentAt: null } : {});
         const errors = a.consecutiveErrors + 1;
         if (errors >= SAFETY.transientErrorsBeforePause) {
           await pauseAccount(a, `${errors} errors in a row: ${shortError(e).slice(0, 160)}`);

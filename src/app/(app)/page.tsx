@@ -5,6 +5,7 @@ import { db, schema } from "@/db";
 import { parseRange } from "@/lib/analytics";
 import type { RangeKey } from "@/lib/analytics";
 import { requireUser } from "@/lib/auth";
+import { budgetStatus } from "@/lib/budget";
 import { env } from "@/lib/env";
 
 // Every page here is per-user and reads the session cookie, so it renders on request.
@@ -42,10 +43,11 @@ export default async function HomePage({ searchParams }: PageProps<"/">) {
     .from(schema.conversations)
     .where(and(eq(schema.conversations.unread, true), eq(schema.conversations.lastFromProspect, true)));
 
+  const budget = await budgetStatus();
   const accountTiles = [
     { label: "Connected accounts", value: by.ok ?? 0 },
     { label: "Switched on", value: sending },
-    { label: "Need attention", value: attention },
+    { label: "Need attention", value: attention, href: "/accounts/health" },
     { label: "Drafts waiting for approval", value: awaitingApproval, href: "/message-review" },
     { label: "Replies to answer", value: unreadReplies, href: "/inbox?unread=1" },
   ] as { label: string; value: number; href?: string }[];
@@ -54,6 +56,13 @@ export default async function HomePage({ searchParams }: PageProps<"/">) {
       <h1 className="text-xl font-semibold">Hello, {user.name.split(" ")[0]}</h1>
       <p className="mt-1 text-sm text-muted">Here is what happened across your accounts. Days are in {env.APP_TIMEZONE.replace(/_/g, " ")}.</p>
 
+      {budget.share !== null && budget.share >= 0.8 && (
+        <p role="alert" className="mt-4 flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900">
+          <span aria-hidden>⚠</span>
+          {budget.share >= 1 ? "The monthly AI budget is used up, so drafting is paused." : `${Math.round(budget.share * 100)}% of the monthly AI budget is used.`}{" "}
+          <Link href="/settings/usage" className="underline">AI usage</Link>
+        </p>
+      )}
       <h2 className="mt-6 font-medium">Needs attention</h2>
       <div className="mt-3 grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-5">
         {accountTiles.map((t) => {

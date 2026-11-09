@@ -6,6 +6,7 @@ import { env } from "./env";
 import { leadFromSearchItem } from "./linkedin";
 import type { LeadInput } from "./linkedin";
 import { enqueueImportPage } from "./queue";
+import { suppressedIndexes } from "./suppression";
 import { isPermanentUnipileError, searchPeople } from "./unipile";
 import type { SearchBody, SearchPage } from "./unipile";
 
@@ -29,11 +30,19 @@ function pageGapSeconds() {
   return 25 + Math.random() * 50;
 }
 
-/** Inserts leads, skipping ones already in the list. Returns how many were new. */
-export async function insertLeads(listId: string, rows: LeadInput[]): Promise<number> {
+/**
+ * Inserts leads, skipping ones already in the list and anyone on the do-not-contact list.
+ * Returns how many were new; `onSuppressed` receives how many were left out for the list.
+ */
+export async function insertLeads(listId: string, rows: LeadInput[], onSuppressed?: (n: number) => void): Promise<number> {
   let added = 0;
+  let suppressed = 0;
   for (let i = 0; i < rows.length; i += 500) {
-    const chunk = rows.slice(i, i + 500).map((r) => ({ ...r, listId }));
+    const batch = rows.slice(i, i + 500);
+    const blocked = await suppressedIndexes(batch);
+    suppressed += blocked.size;
+    const chunk = batch.filter((_, j) => !blocked.has(j)).map((r) => ({ ...r, listId }));
+    if (!chunk.length) continue;
     const inserted = await db
       .insert(schema.leads)
       .values(chunk)
@@ -41,6 +50,7 @@ export async function insertLeads(listId: string, rows: LeadInput[]): Promise<nu
       .returning({ id: schema.leads.id });
     added += inserted.length;
   }
+  onSuppressed?.(suppressed);
   return added;
 }
 

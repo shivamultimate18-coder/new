@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { and, asc, count, eq, gte, inArray } from "drizzle-orm";
 import { ConfirmButton } from "@/components/confirm-button";
 import { db, schema } from "@/db";
@@ -86,11 +87,14 @@ export default async function AccountsPage({ searchParams }: PageProps<"/account
             no LinkedIn passwords are stored here.
           </p>
         </div>
-        <form action={connectAccount}>
-          <button type="submit" className="btn btn-primary">
-            Connect account
-          </button>
-        </form>
+        <div className="flex flex-wrap gap-2">
+          <Link href="/accounts/health" className="btn btn-secondary">Account health</Link>
+          <form action={connectAccount}>
+            <button type="submit" className="btn btn-primary">
+              Connect account
+            </button>
+          </form>
+        </div>
       </div>
 
       {notice && (

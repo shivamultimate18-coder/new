@@ -70,6 +70,7 @@ export default async function LeadListPage({ params, searchParams }: PageProps<"
     facts.push(["Rows in file", String(params_.rows ?? "")]);
     facts.push(["Duplicates skipped", String(params_.duplicates ?? 0)]);
     facts.push(["Unusable rows skipped", String(params_.skipped ?? 0)]);
+    if (Number(params_.suppressed)) facts.push(["On the do-not-contact list", String(params_.suppressed)]);
   }
   for (const [k, v] of Object.entries(display)) facts.push([k, v]);
 

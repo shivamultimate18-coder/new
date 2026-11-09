@@ -215,13 +215,14 @@ export async function importCsv(_prev: FormState, fd: FormData): Promise<FormSta
       params: { fileName: file.name, rows: parsed.data.length, mapping },
     })
     .returning();
-  const added = await insertLeads(list.id, leads);
+  let suppressed = 0;
+  const added = await insertLeads(list.id, leads, (n) => (suppressed = n));
   await db
     .update(schema.leadLists)
     .set({
       status: "ready",
       leadCount: added,
-      params: { fileName: file.name, rows: parsed.data.length, mapping, imported: added, duplicates: leads.length - added, skipped },
+      params: { fileName: file.name, rows: parsed.data.length, mapping, imported: added, duplicates: leads.length - added - suppressed, skipped, suppressed },
       updatedAt: new Date(),
     })
     .where(eq(schema.leadLists.id, list.id));
