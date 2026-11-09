@@ -57,6 +57,13 @@
       "when": 1794261313888,
       "tag": "0007_faithful_abomination",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1794262360080,
+      "tag": "0008_fat_the_anarchist",
+      "breakpoints": true
     }
   ]
 }

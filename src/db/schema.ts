@@ -83,7 +83,7 @@ export const activityLog = pgTable(
     type: text("type").notNull(),
     detail: jsonb("detail"),
   },
-  (t) => [index("activity_log_account_at_idx").on(t.accountId, t.at)],
+  (t) => [index("activity_log_account_at_idx").on(t.accountId, t.at), index("activity_log_type_at_idx").on(t.type, t.at)],
 );
 
 export const leadSource = pgEnum("lead_source", ["sales_nav", "csv", "basic_search"]);
@@ -378,6 +378,7 @@ export const leadState = pgTable(
     index("lead_state_due_idx").on(t.status, t.nextRunAt),
     index("lead_state_account_idx").on(t.accountId, t.status),
     index("lead_state_chat_idx").on(t.chatId),
+    index("lead_state_invite_sent_idx").on(t.inviteSentAt),
     index("lead_state_campaign_status_idx").on(t.campaignId, t.status),
   ],
 );

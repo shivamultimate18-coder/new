@@ -26,6 +26,11 @@ export const env = {
   get UNIPILE_API_KEY() {
     return required("UNIPILE_API_KEY");
   },
+  /** Timezone for daily charts and "today" on Home (IANA name). */
+  get APP_TIMEZONE() {
+    const tz = process.env.APP_TIMEZONE || "UTC";
+    return tz === "UTC" || Intl.supportedValuesOf("timeZone").includes(tz) ? tz : "UTC";
+  },
   /** AI_MOCK=1 returns canned drafts without calling Claude (local development). */
   get AI_MOCK() {
     return process.env.AI_MOCK === "1";

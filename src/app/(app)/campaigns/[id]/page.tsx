@@ -3,6 +3,8 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { and, asc, count, eq } from "drizzle-orm";
 import { CampaignStatus } from "@/components/campaign-status";
+import { Performance, RangeFilter } from "@/components/performance";
+import { parseRange } from "@/lib/analytics";
 import { ConfirmButton } from "@/components/confirm-button";
 import { ago } from "@/components/list-status";
 import { db, schema } from "@/db";
@@ -17,6 +19,7 @@ export const metadata: Metadata = { title: "Campaign" };
 
 const TABS = [
   { id: "leads", label: "Leads" },
+  { id: "performance", label: "Performance" },
   { id: "sequence", label: "Sequence" },
   { id: "settings", label: "Settings" },
 ] as const;
@@ -189,6 +192,12 @@ export default async function CampaignPage({ params, searchParams }: PageProps<"
 
       <div className="mt-6">
         {tab === "leads" && <LeadsTab campaign={c} manage={manage} statusFilter={typeof sp.status === "string" ? sp.status : null} page={Math.max(1, Number(sp.page) || 1)} skipped={by.skipped ?? 0} />}
+        {tab === "performance" && (
+          <div className="space-y-4">
+            <RangeFilter range={parseRange(sp.range)} hrefFor={(r) => `/campaigns/${c.id}?tab=performance&range=${r}`} />
+            <Performance range={parseRange(sp.range)} campaignId={c.id} showAccounts />
+          </div>
+        )}
         {tab === "sequence" && (
           <ol className="space-y-3">
             {c.steps.map((s, i) => (

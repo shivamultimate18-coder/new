@@ -5,7 +5,24 @@ Self-hosted multi-account LinkedIn outreach tool. The plan is in
 [docs/sendroq-scrape.md](docs/sendroq-scrape.md) (used to understand the features only; all
 wording and design here are our own).
 
-## Status: Phases 1 to 7 done
+## Status: Phases 1 to 8 done
+
+Phase 8, Home and campaign analytics (`src/lib/analytics.ts`, `src/components/performance.tsx`):
+
+- **Home:** "Needs attention" (accounts, drafts waiting, replies to answer), then
+  Performance for the last 7, 14, 30 or 90 days, for all campaigns or one: invites sent,
+  accepted with acceptance rate, messages sent, replies with reply rate, and conversations
+  labelled Interested; a daily line chart; and tables by campaign and by account.
+- **Campaigns:** a Performance tab on each campaign, and acceptance and reply rates on the
+  campaign cards.
+- **How rates are counted:** on the leads invited in the period (or connected already), so
+  they never pass 100%: acceptance = accepted / invited, reply rate = replied / accepted.
+  Daily counts are what happened each day. Manual inbox replies are not counted as
+  campaign messages.
+- Days follow `APP_TIMEZONE` (default UTC).
+- The chart is hand-built SVG: one axis, a crosshair tooltip that lists every series,
+  arrow-key reading, labels at the line ends, a legend, and a table view. Its colours were
+  run through a colour-blindness and contrast validator.
 
 Phase 7, Inbox (`/inbox`, `src/lib/inbox.ts`):
 
@@ -128,7 +145,7 @@ Phase 1:
   secret). A status other than Connected switches sending off for that account.
 - Docker, Docker Compose and Caddy files for the Hetzner deploy
 
-Not built yet: Phase 8 (Home and campaign analytics) onward.
+Not built yet: Phase 9 (100-account hardening) and the Phase 10 pilot.
 
 ## Local development
 

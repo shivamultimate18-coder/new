@@ -5,6 +5,7 @@ import { ago } from "@/components/list-status";
 import { CampaignStatus } from "@/components/campaign-status";
 import { db, schema } from "@/db";
 import { requireUser } from "@/lib/auth";
+import { pct, rate } from "@/lib/analytics";
 import { playbookById } from "@/lib/campaigns/playbooks";
 import { createCampaign } from "./actions";
 
@@ -23,6 +24,9 @@ export default async function CampaignsPage({ searchParams }: PageProps<"/campai
       enrolled: sql<number>`(select count(*)::int from lead_state ls where ls.campaign_id = ${schema.campaigns.id} and ls.status <> 'skipped')`,
       inProgress: sql<number>`(select count(*)::int from lead_state ls where ls.campaign_id = ${schema.campaigns.id} and ls.status = 'active')`,
       accounts: sql<number>`(select count(*)::int from campaign_accounts ca where ca.campaign_id = ${schema.campaigns.id})`,
+      invited: sql<number>`(select count(*)::int from lead_state ls where ls.campaign_id = ${schema.campaigns.id} and (ls.invite_sent_at is not null or ls.accepted_at is not null))`,
+      accepted: sql<number>`(select count(*)::int from lead_state ls where ls.campaign_id = ${schema.campaigns.id} and ls.accepted_at is not null)`,
+      replied: sql<number>`(select count(*)::int from lead_state ls where ls.campaign_id = ${schema.campaigns.id} and ls.accepted_at is not null and ls.replied_at is not null)`,
     })
     .from(schema.campaigns)
     .leftJoin(schema.leadLists, eq(schema.leadLists.id, schema.campaigns.leadListId))
@@ -63,7 +67,7 @@ export default async function CampaignsPage({ searchParams }: PageProps<"/campai
         </div>
       ) : (
         <ul className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {rows.map(({ c, listName, enrolled, inProgress, accounts }) => (
+          {rows.map(({ c, listName, enrolled, inProgress, accounts, invited, accepted, replied }) => (
             <li key={c.id}>
               <Link href={`/campaigns/${c.id}`} className="card flex h-full flex-col p-4 hover:border-brand">
                 <div className="flex items-start justify-between gap-2">
@@ -85,6 +89,18 @@ export default async function CampaignsPage({ searchParams }: PageProps<"/campai
                   <div>
                     <dt className="text-xs text-muted">Accounts</dt>
                     <dd className="tabular-nums">{accounts}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs text-muted">Acceptance</dt>
+                    <dd className="tabular-nums">{pct(rate(accepted, invited))}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs text-muted">Reply rate</dt>
+                    <dd className="tabular-nums">{pct(rate(replied, accepted))}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs text-muted">Invited</dt>
+                    <dd className="tabular-nums">{invited.toLocaleString()}</dd>
                   </div>
                 </dl>
                 <span className="mt-3 truncate text-xs text-muted">{listName ? `List: ${listName}` : "No lead list chosen"}</span>
