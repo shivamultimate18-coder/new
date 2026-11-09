@@ -16,10 +16,11 @@ ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 PORT=3000 HOSTNAME=0.0.0.0
 RUN addgroup -S app && adduser -S app -G app
 COPY --from=build --chown=app:app /app/.next/standalone ./
 COPY --from=build --chown=app:app /app/.next/static ./.next/static
-# Migration and admin scripts, run with: docker compose run --rm app npm run db:migrate
+# Worker, migration and admin scripts run from source with tsx (see docker-compose.yml).
 COPY --from=build --chown=app:app /app/drizzle ./drizzle
 COPY --from=build --chown=app:app /app/scripts ./scripts
-COPY --from=build --chown=app:app /app/src/db ./src/db
+COPY --from=build --chown=app:app /app/src ./src
+COPY --from=build --chown=app:app /app/tsconfig.json ./tsconfig.json
 COPY --from=deps --chown=app:app /app/node_modules ./node_modules
 COPY --chown=app:app package.json ./
 USER app

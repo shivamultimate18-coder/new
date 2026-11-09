@@ -13,6 +13,13 @@ services:
       timeout: 5s
       retries: 3
 
+  # Runs queued jobs: lead imports now, sending from Phase 5.
+  worker:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    command: ["npx", "tsx", "--conditions=react-server", "scripts/worker.ts"]
+
   caddy:
     image: caddy:2.8.4
     restart: unless-stopped

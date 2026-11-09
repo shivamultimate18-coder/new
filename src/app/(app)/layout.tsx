@@ -9,7 +9,7 @@ export const instant = false;
 // Sections arrive phase by phase (docs/ACTION_PLAN.md section 6).
 const NAV: { group: string; items: { label: string; href?: string }[] }[] = [
   { group: "", items: [{ label: "Home", href: "/" }] },
-  { group: "Discover", items: [{ label: "Lead Sources" }] },
+  { group: "Discover", items: [{ label: "Lead Sources", href: "/lead-sources" }] },
   { group: "Execute", items: [{ label: "Campaigns" }, { label: "Message Review" }, { label: "Voice" }] },
   { group: "Converse", items: [{ label: "Inbox" }] },
   {

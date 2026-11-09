@@ -111,3 +111,68 @@ export async function registerAccountStatusWebhook(): Promise<unknown> {
 export function mockAccountId(): string {
   return `mock_${randomBytes(6).toString("hex")}`;
 }
+
+// ---------------------------------------------------------------------------
+// LinkedIn search (Phase 2). Unipile runs the search with the account's own
+// LinkedIn session. Endpoint and field names follow Unipile's LinkedIn search
+// docs; verify against https://developer.unipile.com/docs/linkedin-search.
+
+export type SearchBody =
+  | { api: "sales_navigator"; category: "people"; url: string }
+  | {
+      api: "classic";
+      category: "people";
+      keywords?: string;
+      location?: string[];
+      industry?: string[];
+      advanced_keywords?: { title?: string };
+    };
+
+export type SearchItem = Record<string, unknown>;
+export type SearchPage = { items: SearchItem[]; cursor: string | null; totalCount: number | null };
+
+export async function searchPeople(opts: {
+  unipileAccountId: string;
+  body: SearchBody;
+  cursor: string | null;
+  limit: number;
+}): Promise<SearchPage> {
+  const q = new URLSearchParams({ account_id: opts.unipileAccountId, limit: String(opts.limit) });
+  if (opts.cursor) q.set("cursor", opts.cursor);
+  const res = await call<{
+    items?: SearchItem[];
+    cursor?: string | null;
+    paging?: { total_count?: number | null };
+  }>("POST", `/linkedin/search?${q}`, opts.body);
+  return {
+    items: res.items ?? [],
+    cursor: res.cursor ?? null,
+    totalCount: res.paging?.total_count ?? null,
+  };
+}
+
+/** Resolves a typed place or industry name to LinkedIn's id for use in a classic search. */
+export async function lookupSearchParameter(opts: {
+  unipileAccountId: string;
+  type: "LOCATION" | "INDUSTRY";
+  keywords: string;
+}): Promise<{ id: string; title: string } | null> {
+  if (env.UNIPILE_MOCK) return { id: `mock-${opts.type.toLowerCase()}`, title: opts.keywords };
+  const q = new URLSearchParams({
+    account_id: opts.unipileAccountId,
+    type: opts.type,
+    keywords: opts.keywords,
+    limit: "1",
+  });
+  const res = await call<{ items?: { id: string; title: string }[] }>(
+    "GET",
+    `/linkedin/search/parameters?${q}`,
+  );
+  return res.items?.[0] ?? null;
+}
+
+/** Errors that will not go away by retrying (bad URL, no Sales Navigator, auth). */
+export function isPermanentUnipileError(e: unknown): boolean {
+  const m = e instanceof Error ? e.message : "";
+  return /failed: (400|401|403|404|422)\b/.test(m);
+}
