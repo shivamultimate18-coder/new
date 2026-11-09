@@ -10,7 +10,7 @@ export const instant = false;
 const NAV: { group: string; items: { label: string; href?: string }[] }[] = [
   { group: "", items: [{ label: "Home", href: "/" }] },
   { group: "Discover", items: [{ label: "Lead Sources", href: "/lead-sources" }] },
-  { group: "Execute", items: [{ label: "Campaigns" }, { label: "Message Review" }, { label: "Voice" }] },
+  { group: "Execute", items: [{ label: "Campaigns" }, { label: "Message Review" }, { label: "Voice", href: "/voice" }] },
   { group: "Converse", items: [{ label: "Inbox" }] },
   {
     group: "Settings",

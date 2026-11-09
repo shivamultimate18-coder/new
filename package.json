@@ -15,6 +15,7 @@
     "worker": "tsx --env-file-if-exists=.env --conditions=react-server scripts/worker.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^1.7.0",
     "bcryptjs": "^3.0.3",
     "drizzle-orm": "^0.45.4",
     "jose": "^6.2.17",

@@ -157,7 +157,102 @@ export const leads = pgTable(
   ],
 );
 
+// ---------------------------------------------------------------------------
+// Voice (Phase 3): what we sell and how outreach should sound.
+
+export type RuleSet = { do: string[]; dont: string[] };
+
+export const products = pgTable("products", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: text("name").notNull(),
+  description: text("description").notNull().default(""),
+  icp: text("icp").notNull().default(""),
+  bookingLink: text("booking_link").notNull().default(""),
+  specifics: text("specifics").notNull().default(""),
+  competitors: text("competitors").notNull().default(""),
+  services: text("services").notNull().default(""),
+  price: text("price").notNull().default(""),
+  freeOffer: text("free_offer").notNull().default(""),
+  valueProps: text("value_props").notNull().default(""),
+  painPoints: text("pain_points").notNull().default(""),
+  proofPoints: text("proof_points").notNull().default(""),
+  pitchRules: jsonb("pitch_rules").$type<RuleSet>().notNull().default({ do: [], dont: [] }),
+  createdByUserId: uuid("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const writingStyles = pgTable("writing_styles", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: text("name").notNull(),
+  rules: jsonb("rules").$type<RuleSet>().notNull().default({ do: [], dont: [] }),
+  defaultProductId: uuid("default_product_id").references(() => products.id, { onDelete: "set null" }),
+  createdByUserId: uuid("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** What changed on a writing style and why: packs applied, rules edited, rules learned. */
+export const styleEvents = pgTable(
+  "style_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    styleId: uuid("style_id")
+      .notNull()
+      .references(() => writingStyles.id, { onDelete: "cascade" }),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
+    type: text("type").notNull(),
+    description: text("description").notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("style_events_style_at_idx").on(t.styleId, t.at)],
+);
+
+export type DraftSequence = {
+  angle: string;
+  messages: { step: "opener" | "follow_up_1" | "last_note"; body: string }[];
+  warnings: string[];
+};
+
+/** Playground drafts, kept so the team can compare runs as rules change. */
+export const playgroundRuns = pgTable(
+  "playground_runs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    styleId: uuid("style_id")
+      .notNull()
+      .references(() => writingStyles.id, { onDelete: "cascade" }),
+    productId: uuid("product_id").references(() => products.id, { onDelete: "set null" }),
+    leadId: uuid("lead_id").references(() => leads.id, { onDelete: "set null" }),
+    prospect: jsonb("prospect").$type<Record<string, string>>().notNull(),
+    output: jsonb("output").$type<DraftSequence>().notNull(),
+    model: text("model").notNull(),
+    createdByUserId: uuid("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("playground_runs_style_idx").on(t.styleId, t.createdAt)],
+);
+
+/** One row per Claude API call, for cost tracking and spend caps. */
+export const aiUsage = pgTable(
+  "ai_usage",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+    feature: text("feature").notNull(),
+    model: text("model").notNull(),
+    inputTokens: integer("input_tokens").notNull().default(0),
+    outputTokens: integer("output_tokens").notNull().default(0),
+    cacheReadTokens: integer("cache_read_tokens").notNull().default(0),
+    cacheWriteTokens: integer("cache_write_tokens").notNull().default(0),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
+  },
+  (t) => [index("ai_usage_at_idx").on(t.at)],
+);
+
 export type User = typeof users.$inferSelect;
 export type Account = typeof accounts.$inferSelect;
 export type LeadList = typeof leadLists.$inferSelect;
 export type Lead = typeof leads.$inferSelect;
+export type Product = typeof products.$inferSelect;
+export type WritingStyle = typeof writingStyles.$inferSelect;

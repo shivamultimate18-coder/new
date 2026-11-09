@@ -22,6 +22,13 @@
       "when": 1794257875343,
       "tag": "0002_silky_fabian_cortez",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1794258128072,
+      "tag": "0003_tired_jackpot",
+      "breakpoints": true
     }
   ]
 }

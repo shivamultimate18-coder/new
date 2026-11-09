@@ -26,6 +26,13 @@ export const env = {
   get UNIPILE_API_KEY() {
     return required("UNIPILE_API_KEY");
   },
+  /** AI_MOCK=1 returns canned drafts without calling Claude (local development). */
+  get AI_MOCK() {
+    return process.env.AI_MOCK === "1";
+  },
+  get ANTHROPIC_API_KEY() {
+    return process.env.ANTHROPIC_API_KEY ?? "";
+  },
   get UNIPILE_WEBHOOK_SECRET() {
     return required("UNIPILE_WEBHOOK_SECRET");
   },

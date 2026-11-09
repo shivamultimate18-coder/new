@@ -5,7 +5,23 @@ Self-hosted multi-account LinkedIn outreach tool. The plan is in
 [docs/sendroq-scrape.md](docs/sendroq-scrape.md) (used to understand the features only; all
 wording and design here are our own).
 
-## Status: Phases 1 and 2 done
+## Status: Phases 1 to 3 done
+
+Phase 3, Voice:
+
+- **Products:** name, description, ideal customer profile (with "Draft with AI"), services,
+  specifics, competitors, value propositions, pain points, proof points, price, free offer,
+  booking link and product pitch rules
+- **Writing styles:** DO and DON'T rules, five starter packs (our own wording), a default
+  product, and an activity log of every rule change
+- **Playground:** drafts opener, follow-up 1 and last note for an imported lead or a made-up
+  prospect. Feedback on any message is turned into proposed rules that you accept one by one.
+- **Step rules enforced in code** (`src/lib/voice/compose.ts`): each product field is only
+  offered for the steps that may use it, and every draft is checked for links and prices in
+  the opener, links in follow-up 1, prices in the last note, and the free offer appearing
+  early. A failing draft gets one automatic rewrite; anything still wrong is shown as a warning.
+- Models: Claude Sonnet 5.5 for drafting (with server-side refusal fallback), Claude Haiku 5.5
+  for rules and profiles. Every call's token usage is stored in `ai_usage`.
 
 Phase 2, Lead Sources:
 
@@ -34,7 +50,7 @@ Phase 1:
   secret). A status other than Connected switches sending off for that account.
 - Docker, Docker Compose and Caddy files for the Hetzner deploy
 
-Not built yet: everything from Phase 3 (Voice) on. Accounts start at 5 invites and
+Not built yet: everything from Phase 4 (Campaigns) on. Accounts start at 5 invites and
 20 messages a day; the Phase 5 sending engine will raise these during warm-up.
 
 ## Local development
@@ -52,6 +68,11 @@ npm run worker   # background jobs, in a second terminal
 
 With `UNIPILE_MOCK=1`, "Connect account" opens a simulated sign-in page instead of
 Unipile, and searches return generated test leads, so everything works without a Unipile key.
+With `AI_MOCK=1`, drafts are canned text instead of Claude calls.
+
+Do not run `next build` while `next dev` is running: they share `.next`, and the dev server
+then reloads the page in a loop. Stop the dev server, build, then delete `.next` before
+starting it again.
 
 Schema changes: edit `src/db/schema.ts`, then `npm run db:generate` and `npm run db:migrate`.
 
@@ -59,7 +80,9 @@ Schema changes: edit `src/db/schema.ts`, then `npm run db:generate` and `npm run
 
 1. Fill `.env` on the app server: `DATABASE_URL` (database server's private IP), `APP_URL`
    (`https://app.yourdomain.com`), `AUTH_SECRET`, `UNIPILE_DSN`, `UNIPILE_API_KEY`,
-   `UNIPILE_WEBHOOK_SECRET`, `DOMAIN` (`app.yourdomain.com`). Leave `UNIPILE_MOCK` empty.
+   `UNIPILE_WEBHOOK_SECRET`, `ANTHROPIC_API_KEY`, `DOMAIN` (`app.yourdomain.com`). Leave
+   `UNIPILE_MOCK` and `AI_MOCK` empty. Set a monthly spend limit on the Anthropic key in the
+   Anthropic Console.
 2. `docker compose up -d --build` (starts the app, the worker and Caddy)
 3. `docker compose run --rm app npx tsx scripts/migrate.ts`
 4. `docker compose run --rm -e USER_PASSWORD='...' app npx tsx scripts/create-user.ts you@example.com "Your Name" admin`
