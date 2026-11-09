@@ -1,6 +1,5 @@
-# Production: app + Caddy on the app server. Postgres runs on a separate server
-# on the private network (plan section 5); set DATABASE_URL in .env accordingly.
-# For a single-server trial, uncomment the db service.
+# App, worker and Caddy (HTTPS). The database either runs here too (pilot: add
+# `--profile with-db`) or on a separate server on the private network (plan section 5).
 services:
   app:
     build: .
@@ -13,7 +12,7 @@ services:
       timeout: 5s
       retries: 3
 
-  # Runs queued jobs: lead imports now, sending from Phase 5.
+  # Background jobs: lead imports, AI drafting, reply labels and the sending engine.
   worker:
     build: .
     restart: unless-stopped
@@ -31,15 +30,25 @@ services:
       - caddy_data:/data
     depends_on: [app]
 
-  # db:
-  #   image: postgres:16
-  #   restart: unless-stopped
-  #   environment:
-  #     POSTGRES_USER: outreach
-  #     POSTGRES_PASSWORD: change-me
-  #     POSTGRES_DB: outreach
-  #   volumes: [pg_data:/var/lib/postgresql/data]
+  # Single-server pilot only: `docker compose --profile with-db up -d`.
+  # Then DATABASE_URL=postgres://outreach:<POSTGRES_PASSWORD>@db:5432/outreach
+  db:
+    image: postgres:16
+    profiles: ["with-db"]
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: outreach
+      # The postgres image refuses to start without a password, which makes a missing one obvious.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
+      POSTGRES_DB: outreach
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "outreach"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
 volumes:
   caddy_data:
-  # pg_data:
+  pg_data:

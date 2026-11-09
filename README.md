@@ -217,7 +217,10 @@ per lead, accounts belong to the campaign, nobody invited twice, all 200 cross-f
 duplicates caught, nobody contacted after joining the do-not-contact list, no message after
 a reply, no leads left locked).
 
-## Going live (Phase 1 parts of plan section 7)
+## Going live
+
+**Step-by-step pilot guide: [docs/PILOT.md](docs/PILOT.md)** (accounts to open, server setup,
+the first 20-lead campaign, what to watch, and how to decide on rollout). (Phase 1 parts of plan section 7)
 
 1. Fill `.env` on the app server: `DATABASE_URL` (database server's private IP), `APP_URL`
    (`https://app.yourdomain.com`), `AUTH_SECRET`, `UNIPILE_DSN`, `UNIPILE_API_KEY`,
