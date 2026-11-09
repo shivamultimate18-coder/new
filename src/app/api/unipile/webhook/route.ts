@@ -15,7 +15,12 @@ const MessageReceived = z.object({
   event: z.literal("message_received"),
   account_id: z.string().min(1),
   chat_id: z.string().min(1),
-  sender: z.object({ attendee_provider_id: z.string().nullish() }).passthrough(),
+  message_id: z.string().nullish(),
+  message: z.string().nullish(),
+  timestamp: z.string().nullish(),
+  is_sender: z.union([z.boolean(), z.number()]).nullish(),
+  account_info: z.object({ user_id: z.string().nullish() }).passthrough().nullish(),
+  sender: z.object({ attendee_provider_id: z.string().nullish(), attendee_name: z.string().nullish() }).passthrough(),
 });
 const NewRelation = z.object({
   event: z.literal("new_relation"),
@@ -39,7 +44,17 @@ export async function POST(request: NextRequest) {
   }
   const message = MessageReceived.safeParse(body);
   if (message.success) {
-    await handleIncomingMessage(message.data.account_id, message.data.chat_id, message.data.sender.attendee_provider_id ?? null);
+    const d = message.data;
+    const sender = d.sender.attendee_provider_id ?? null;
+    const own = d.account_info?.user_id ?? null;
+    const fromAccount = d.is_sender != null ? Boolean(d.is_sender) : own && sender ? own === sender : null;
+    await handleIncomingMessage(d.account_id, d.chat_id, sender, {
+      text: d.message ?? "",
+      externalId: d.message_id,
+      at: d.timestamp,
+      senderName: d.sender.attendee_name,
+      fromAccount,
+    });
     return NextResponse.json({ ok: true });
   }
   const relation = NewRelation.safeParse(body);

@@ -411,6 +411,87 @@ export const messageDrafts = pgTable(
   (t) => [index("message_drafts_state_step_idx").on(t.leadStateId, t.stepIndex), index("message_drafts_status_idx").on(t.status)],
 );
 
+// ---------------------------------------------------------------------------
+// Inbox (Phase 7)
+
+export const INTENTS = ["interested", "maybe", "not_interested", "pitching_us", "needs_human"] as const;
+export type Intent = (typeof INTENTS)[number];
+
+export const conversations = pgTable(
+  "conversations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    accountId: uuid("account_id")
+      .notNull()
+      .references(() => accounts.id, { onDelete: "cascade" }),
+    /** Unipile chat id. */
+    chatId: text("chat_id").notNull(),
+    /** Set when the chat belongs to a campaign lead. */
+    leadStateId: uuid("lead_state_id").references(() => leadState.id, { onDelete: "set null" }),
+    leadId: uuid("lead_id").references(() => leads.id, { onDelete: "set null" }),
+    prospectProviderId: text("prospect_provider_id"),
+    prospectName: text("prospect_name").notNull().default(""),
+    prospectHeadline: text("prospect_headline"),
+    prospectProfileUrl: text("prospect_profile_url"),
+    intent: text("intent").$type<Intent>(),
+    /** "ai" labels are re-scored on each inbound message; "manual" labels are never overwritten. */
+    intentSource: text("intent_source").$type<"ai" | "manual">(),
+    intentReason: text("intent_reason"),
+    lastMessageAt: timestamp("last_message_at", { withTimezone: true }),
+    lastMessagePreview: text("last_message_preview"),
+    lastFromProspect: boolean("last_from_prospect").notNull().default(false),
+    unread: boolean("unread").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("conversations_account_chat_idx").on(t.accountId, t.chatId),
+    index("conversations_last_idx").on(t.lastMessageAt),
+    index("conversations_lead_state_idx").on(t.leadStateId),
+  ],
+);
+
+export const messages = pgTable(
+  "messages",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    conversationId: uuid("conversation_id")
+      .notNull()
+      .references(() => conversations.id, { onDelete: "cascade" }),
+    /** Unipile message id, when known; used to avoid storing a message twice. */
+    externalId: text("external_id"),
+    direction: text("direction").$type<"in" | "out">().notNull(),
+    body: text("body").notNull(),
+    /** campaign: sent by the engine. inbox: a teammate replied here. linkedin: arrived by webhook or sync. */
+    source: text("source").$type<"campaign" | "inbox" | "linkedin">().notNull(),
+    sentByUserId: uuid("sent_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    sentAt: timestamp("sent_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("messages_conversation_idx").on(t.conversationId, t.sentAt),
+    uniqueIndex("messages_external_idx").on(t.conversationId, t.externalId),
+  ],
+);
+
+export const tags = pgTable("tags", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: text("name").notNull().unique(),
+  color: text("color").notNull().default("slate"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const conversationTags = pgTable(
+  "conversation_tags",
+  {
+    conversationId: uuid("conversation_id")
+      .notNull()
+      .references(() => conversations.id, { onDelete: "cascade" }),
+    tagId: uuid("tag_id")
+      .notNull()
+      .references(() => tags.id, { onDelete: "cascade" }),
+  },
+  (t) => [primaryKey({ columns: [t.conversationId, t.tagId] })],
+);
+
 export type User = typeof users.$inferSelect;
 export type Account = typeof accounts.$inferSelect;
 export type LeadList = typeof leadLists.$inferSelect;
@@ -418,3 +499,4 @@ export type Lead = typeof leads.$inferSelect;
 export type Product = typeof products.$inferSelect;
 export type WritingStyle = typeof writingStyles.$inferSelect;
 export type Campaign = typeof campaigns.$inferSelect;
+export type Conversation = typeof conversations.$inferSelect;

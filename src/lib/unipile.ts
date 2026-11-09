@@ -284,3 +284,14 @@ export async function recentRelations(unipileAccountId: string, limit = 100): Pr
   );
   return (r.items ?? []).map((x) => ({ providerId: x.member_id ?? null, publicIdentifier: x.public_identifier?.toLowerCase() ?? null }));
 }
+
+/** Recent chats on an account, newest first (Inbox sync). */
+export type ChatSummary = { id: string; attendeeProviderId: string | null; name: string | null; at: string | null };
+
+export async function recentChats(unipileAccountId: string, limit = 30): Promise<ChatSummary[]> {
+  const r = await call<{ items?: { id: string; attendee_provider_id?: string | null; name?: string | null; timestamp?: string | null }[] }>(
+    "GET",
+    `/chats?account_id=${encodeURIComponent(unipileAccountId)}&limit=${limit}`,
+  );
+  return (r.items ?? []).map((c) => ({ id: c.id, attendeeProviderId: c.attendee_provider_id ?? null, name: c.name ?? null, at: c.timestamp ?? null }));
+}

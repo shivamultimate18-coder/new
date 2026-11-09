@@ -36,6 +36,11 @@ export default async function HomePage() {
     .from(schema.leadState)
     .where(and(eq(schema.leadState.status, "active"), eq(schema.leadState.waiting, "approval")));
 
+  const [{ n: unreadReplies }] = await db
+    .select({ n: count() })
+    .from(schema.conversations)
+    .where(and(eq(schema.conversations.unread, true), eq(schema.conversations.lastFromProspect, true)));
+
   const tiles = [
     { label: "Invites sent", value: act("invite.sent") },
     { label: "Invites accepted", value: act("invite.accepted") },
@@ -46,8 +51,9 @@ export default async function HomePage() {
     { label: "Connected accounts", value: by.ok ?? 0 },
     { label: "Switched on", value: sending },
     { label: "Need attention", value: attention },
-    { label: "Drafts waiting for approval", value: awaitingApproval },
-  ];
+    { label: "Drafts waiting for approval", value: awaitingApproval, href: "/message-review" },
+    { label: "Replies to answer", value: unreadReplies, href: "/inbox?unread=1" },
+  ] as { label: string; value: number; href?: string }[];
   return (
     <div className="max-w-4xl">
       <h1 className="text-xl font-semibold">Hello, {user.name.split(" ")[0]}</h1>
@@ -60,14 +66,22 @@ export default async function HomePage() {
           </div>
         ))}
       </div>
-      <h2 className="mt-8 font-medium">Accounts and approvals</h2>
-      <div className="mt-3 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {accountTiles.map((t) => (
-          <div key={t.label} className={`card p-4 ${t.label === "Need attention" && t.value > 0 ? "border-red-300" : ""}`}>
-            <div className="text-sm text-muted">{t.label}</div>
-            <div className="mt-1 text-2xl font-semibold tabular-nums">{t.value}</div>
-          </div>
-        ))}
+      <h2 className="mt-8 font-medium">Needs attention</h2>
+      <div className="mt-3 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {accountTiles.map((t) => {
+          const body = (
+            <>
+              <div className="text-sm text-muted">{t.label}</div>
+              <div className="mt-1 text-2xl font-semibold tabular-nums">{t.value}</div>
+            </>
+          );
+          const cls = `card block p-4 ${t.label === "Need attention" && t.value > 0 ? "border-red-300" : ""}`;
+          return t.href ? (
+            <Link key={t.label} href={t.href} className={`${cls} hover:border-brand`}>{body}</Link>
+          ) : (
+            <div key={t.label} className={cls}>{body}</div>
+          );
+        })}
       </div>
       <Link href="/accounts" className="btn btn-secondary mt-6">
         Manage accounts

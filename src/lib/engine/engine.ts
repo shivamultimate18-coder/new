@@ -3,6 +3,7 @@ import { db, schema } from "@/db";
 import type { Account, Campaign, Lead } from "@/db/schema";
 import { renderTemplate } from "../campaigns/template";
 import { hasAiSteps } from "../drafting";
+import { recordMessage, upsertConversation } from "../inbox";
 import { enqueueDraft } from "../queue";
 import { env } from "../env";
 import {
@@ -179,6 +180,14 @@ const mock = {
   }),
   accepts: (leadId: string) => hash(leadId) % 10 < 7,
   replies: (leadId: string) => hash(leadId + "r") % 4 === 0,
+  replyText: (leadId: string) =>
+    [
+      "Sounds interesting. Can you send me more details?",
+      "Maybe next quarter, we are busy right now.",
+      "Not interested, thanks.",
+      "We actually offer the same services. Would you like a demo of ours?",
+      "Please contact my assistant about this, she handles vendors.",
+    ][hash(leadId + "t") % 5],
 };
 
 // ---------------------------------------------------------------------------
@@ -235,10 +244,21 @@ async function doMessage(ctx: Ctx): Promise<boolean> {
 
   // Never message someone who has replied, even if the webhook was missed.
   if (s.chatId) {
-    const replied = MOCK() ? mock.replies(lead.id) : (await recentChatMessages(s.chatId)).some((m) => m.fromProspect);
-    if (replied) {
-      await markReplied(s.id);
-      return false;
+    if (MOCK()) {
+      if (mock.replies(lead.id)) {
+        // The mock prospect "replies" the way the webhook would deliver it.
+        await handleIncomingMessage(a.unipileAccountId!, s.chatId, lead.providerId, { text: mock.replyText(lead.id), externalId: `mock-${s.id}` });
+        return false;
+      }
+    } else {
+      const recent = await recentChatMessages(s.chatId);
+      const theirs = recent.filter((m) => m.fromProspect);
+      if (theirs.length) {
+        // Store what the webhook missed, then stop the sequence.
+        for (const m of theirs) await handleIncomingMessage(a.unipileAccountId!, s.chatId, lead.providerId, { text: m.text, externalId: m.id, at: m.at, fromAccount: false });
+        await markReplied(s.id);
+        return false;
+      }
     }
   }
 
@@ -277,6 +297,22 @@ async function doMessage(ctx: Ctx): Promise<boolean> {
     ? (s.chatId ?? `mockchat-${s.id}`)
     : await sendMessage({ unipileAccountId: a.unipileAccountId!, providerId, chatId: s.chatId, text });
   await log(a.id, "message.sent", { campaignId: c.id, leadStateId: s.id, step: s.stepIndex });
+  try {
+    const conv = await upsertConversation({
+      accountId: a.id,
+      chatId,
+      leadStateId: s.id,
+      leadId: lead.id,
+      prospectProviderId: providerId,
+      prospectName: `${lead.firstName} ${lead.lastName}`.trim(),
+      prospectHeadline: lead.headline,
+      prospectProfileUrl: lead.profileUrl,
+    });
+    await recordMessage(conv, { direction: "out", body: text, source: "campaign" });
+  } catch (e) {
+    // The message went out; failing to file it in the inbox must not resend it.
+    console.error(`[engine] sent but could not store message for ${s.id}:`, e);
+  }
   if (draftId) {
     await db.update(schema.messageDrafts).set({ status: "sent", sentAt: new Date(), updatedAt: new Date() }).where(eq(schema.messageDrafts.id, draftId));
   }
@@ -475,25 +511,55 @@ export async function handleNewRelation(unipileAccountId: string, providerId: st
   for (const r of rows) await markAccepted(r.id);
 }
 
-/** Webhook: a message arrived in a chat. Only a message from the lead counts as a reply. */
-export async function handleIncomingMessage(unipileAccountId: string, chatId: string, senderProviderId: string | null) {
-  if (!senderProviderId) return;
+/**
+ * A message arrived in a chat (webhook, or found before sending). It is filed in the Inbox;
+ * if it came from a campaign lead, their sequence stops.
+ */
+export async function handleIncomingMessage(
+  unipileAccountId: string,
+  chatId: string,
+  senderProviderId: string | null,
+  m: { text: string; externalId?: string | null; at?: string | null; senderName?: string | null; fromAccount?: boolean | null },
+) {
   const [a] = await db.select().from(schema.accounts).where(eq(schema.accounts.unipileAccountId, unipileAccountId));
   if (!a) return;
-  const rows = await db
-    .select({ s: schema.leadState })
+  // Find the campaign lead: by the chat first, then by who sent it.
+  const byChat = await db
+    .select({ s: schema.leadState, lead: schema.leads })
     .from(schema.leadState)
     .innerJoin(schema.leads, eq(schema.leads.id, schema.leadState.leadId))
-    .where(
-      and(
-        eq(schema.leadState.accountId, a.id),
-        eq(schema.leads.providerId, senderProviderId),
-        inArray(schema.leadState.status, ["active", "pending"]),
-      ),
-    );
-  for (const r of rows) {
-    if (!r.s.chatId) await db.update(schema.leadState).set({ chatId }).where(eq(schema.leadState.id, r.s.id));
-    await markReplied(r.s.id);
+    .where(and(eq(schema.leadState.accountId, a.id), eq(schema.leadState.chatId, chatId)))
+    .limit(1);
+  const bySender =
+    byChat.length || !senderProviderId
+      ? []
+      : await db
+          .select({ s: schema.leadState, lead: schema.leads })
+          .from(schema.leadState)
+          .innerJoin(schema.leads, eq(schema.leads.id, schema.leadState.leadId))
+          .where(and(eq(schema.leadState.accountId, a.id), eq(schema.leads.providerId, senderProviderId)))
+          .limit(1);
+  const match = byChat[0] ?? bySender[0];
+
+  // Our own messages (sent from LinkedIn directly) also arrive here.
+  const fromProspect = m.fromAccount === true ? false : m.fromAccount === false ? true : match ? senderProviderId === match.lead.providerId : true;
+
+  const conv = await upsertConversation({
+    accountId: a.id,
+    chatId,
+    leadStateId: match?.s.id,
+    leadId: match?.lead.id,
+    prospectProviderId: fromProspect ? senderProviderId : match?.lead.providerId,
+    prospectName: match ? `${match.lead.firstName} ${match.lead.lastName}`.trim() : fromProspect ? m.senderName : null,
+    prospectHeadline: match?.lead.headline,
+    prospectProfileUrl: match?.lead.profileUrl,
+  });
+  const at = m.at ? new Date(m.at) : undefined;
+  if (m.text.trim()) await recordMessage(conv, { direction: fromProspect ? "in" : "out", body: m.text, source: "linkedin", externalId: m.externalId, sentAt: at });
+
+  if (fromProspect && match) {
+    if (!match.s.chatId) await db.update(schema.leadState).set({ chatId }).where(eq(schema.leadState.id, match.s.id));
+    await markReplied(match.s.id);
   }
 }
 

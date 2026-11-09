@@ -3,9 +3,10 @@
 import { PgBoss } from "pg-boss";
 import { generateDrafts } from "../src/lib/drafting";
 import { tick } from "../src/lib/engine/engine";
+import { classifyConversation } from "../src/lib/inbox";
 import { runImportPage } from "../src/lib/imports";
 import { QUEUES, ensureQueues } from "../src/lib/queue";
-import type { DraftJob, ImportPageJob } from "../src/lib/queue";
+import type { ClassifyJob, DraftJob, ImportPageJob } from "../src/lib/queue";
 
 const TICK_MS = process.env.UNIPILE_MOCK === "1" ? 3_000 : 60_000;
 
@@ -27,6 +28,13 @@ async function main() {
   await boss.work<DraftJob>(QUEUES.draft, { localConcurrency: 3 }, async ([job]) => {
     const outcome = await generateDrafts(job.data.leadStateId);
     console.log(`[draft] lead=${job.data.leadStateId} ${outcome}`);
+    return { outcome };
+  });
+
+  // Inbox intent, re-scored when a prospect writes.
+  await boss.work<ClassifyJob>(QUEUES.classify, { localConcurrency: 4 }, async ([job]) => {
+    const outcome = await classifyConversation(job.data.conversationId);
+    console.log(`[intent] conversation=${job.data.conversationId} ${outcome}`);
     return { outcome };
   });
 

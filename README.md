@@ -5,7 +5,24 @@ Self-hosted multi-account LinkedIn outreach tool. The plan is in
 [docs/sendroq-scrape.md](docs/sendroq-scrape.md) (used to understand the features only; all
 wording and design here are our own).
 
-## Status: Phases 1 to 6 done
+## Status: Phases 1 to 7 done
+
+Phase 7, Inbox (`/inbox`, `src/lib/inbox.ts`):
+
+- Every account's conversations in one place. Campaign messages are filed as they are
+  sent; replies arrive by the `message_received` webhook (also messages the team sends from
+  LinkedIn directly, and chats outside any campaign); **Sync** pulls each account's recent
+  chats from Unipile to fill gaps. Duplicate webhook deliveries are stored once.
+- **Intent:** Interested, Maybe, Not interested, Pitching us, Needs human. Claude Haiku 5.5
+  reads the whole thread, and only when the prospect writes (debounced per conversation, so a
+  burst is classified once). A label set by a teammate is never overwritten; "Automatic"
+  hands it back to the AI.
+- Filters by account, campaign, intent, unread and text; unread dot; mark unread.
+- **Replies** go out from the account that owns the conversation, and only its owner or an
+  admin may send. They count toward the account's daily activity. "Suggest a reply" drafts
+  one with Claude Haiku from the thread, product facts and writing style.
+- **Tags** (Settings > Tags) with colours; toggle them on a conversation.
+- Home shows replies waiting for an answer.
 
 Phase 6, drafting and Message Review:
 
@@ -111,7 +128,7 @@ Phase 1:
   secret). A status other than Connected switches sending off for that account.
 - Docker, Docker Compose and Caddy files for the Hetzner deploy
 
-Not built yet: Phase 7 (Inbox) onward.
+Not built yet: Phase 8 (Home and campaign analytics) onward.
 
 ## Local development
 
@@ -131,7 +148,8 @@ Unipile, and searches return generated test leads, so everything works without a
 With `AI_MOCK=1`, drafts are canned text instead of Claude calls.
 
 In mock mode the engine fakes LinkedIn: invites are accepted for about 70% of leads, about
-a quarter reply after the first message, the worker ticks every 3 seconds, and a "day"
+a quarter reply after the first message (with interested, maybe, not interested, pitching
+and needs-human style replies), the worker ticks every 3 seconds, and a "day"
 lasts 10 seconds (`MOCK_DAY_SECONDS` changes it) so a whole sequence plays out in minutes.
 Leads named `FailAccount` or `FailLead` make the mock fail like LinkedIn does, for testing.
 
@@ -157,7 +175,8 @@ Schema changes: edit `src/db/schema.ts`, then `npm run db:generate` and `npm run
 
 **Check before the first real connection:** the Unipile request and payload shapes in
 `src/lib/unipile.ts` (hosted login, account status, people search, search parameters,
-profile lookup, invites, chats and messages, relations), the webhook payloads in
+profile lookup, invites, chats and messages, chat list, relations), the webhook payloads
+(including how `is_sender` / `account_info.user_id` tell our messages from theirs) in
 `src/app/api/unipile/webhook/route.ts`, the error types in `classifyError`
 (`src/lib/engine/engine.ts`), the
 search result field names in `src/lib/linkedin.ts`, and the status names in

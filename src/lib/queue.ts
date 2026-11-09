@@ -6,7 +6,16 @@ import { env } from "./env";
 export const QUEUES = {
   importPage: "lead-import-page",
   draft: "draft-messages",
+  classify: "classify-intent",
 } as const;
+
+export type ClassifyJob = { conversationId: string };
+
+/** Debounced per conversation: a burst of messages (or a sync) is classified once, after it ends. */
+export async function enqueueClassify(conversationId: string) {
+  const boss = await getBoss();
+  await boss.sendDebounced(QUEUES.classify, { conversationId } satisfies ClassifyJob, null, 5, conversationId);
+}
 
 export type DraftJob = { leadStateId: string };
 
