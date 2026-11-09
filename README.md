@@ -5,7 +5,31 @@ Self-hosted multi-account LinkedIn outreach tool. The plan is in
 [docs/sendroq-scrape.md](docs/sendroq-scrape.md) (used to understand the features only; all
 wording and design here are our own).
 
-## Status: Phases 1 to 4 done
+## Status: Phases 1 to 5 done
+
+Phase 5, sending engine (`src/lib/engine/engine.ts`, run by the worker):
+
+- Every minute, each connected and switched-on account takes **at most one** LinkedIn
+  action, then waits a random 4 to 11 minutes. Follow-up messages go before new invites.
+- Only inside each campaign's days and hours (in its timezone), and under every limit:
+  the campaign's daily limits per account, the account's warm-up limits (rolling 24 hours),
+  75 invites per rolling week, and 120 actions a day in total.
+- **Warm-up:** new accounts start at 5 invites and 20 messages a day; every 2 days of clean
+  sending adds 1 invite and 3 messages, up to 15 and 40.
+- Each lead is **pinned** to the account that sends its invite. A profile lookup before
+  the invite skips people who are already connected or already invited.
+- **Acceptances** arrive by the `new_relation` webhook, with a check of each account's
+  recent connections every 2 hours as a backup. Invites not accepted in 21 days are closed.
+- **Replies** arrive by the `message_received` webhook. Before every message the engine
+  also reads the chat and stops if the lead has replied. A reply cancels the remaining
+  steps and discards unsent drafts.
+- **Errors:** a problem with one lead (profile gone, cannot be reached) fails that lead
+  only. A problem with the account (signed out, checkpoint, rate limit, LinkedIn limit)
+  pauses the account with the reason shown on Accounts and Home, and never retries in a
+  loop; the lead stays with that account. Network errors back off 15 minutes; three in a
+  row pause the account. Switching the account back on clears the pause.
+- AI-drafted steps wait for an approved draft (Phase 6). Template steps send as written.
+- Only one engine pass runs at a time, even with several workers (database lock).
 
 Phase 4, Campaigns:
 
@@ -66,7 +90,7 @@ Phase 1:
   secret). A status other than Connected switches sending off for that account.
 - Docker, Docker Compose and Caddy files for the Hetzner deploy
 
-Not built yet: everything from Phase 5 (sending engine) on. Message drafting currently
+Not built yet: everything from Phase 6 (drafting and Message Review) on. Message drafting currently
 writes three messages (opener, follow-up, last note); Phase 6 extends it to every AI step
 in a campaign's sequence and adds the playbook brief to the prompt. Accounts start at 5 invites and
 20 messages a day; the Phase 5 sending engine will raise these during warm-up.
@@ -88,6 +112,11 @@ With `UNIPILE_MOCK=1`, "Connect account" opens a simulated sign-in page instead 
 Unipile, and searches return generated test leads, so everything works without a Unipile key.
 With `AI_MOCK=1`, drafts are canned text instead of Claude calls.
 
+In mock mode the engine fakes LinkedIn: invites are accepted for about 70% of leads, about
+a quarter reply after the first message, the worker ticks every 3 seconds, and a "day"
+lasts 10 seconds (`MOCK_DAY_SECONDS` changes it) so a whole sequence plays out in minutes.
+Leads named `FailAccount` or `FailLead` make the mock fail like LinkedIn does, for testing.
+
 Do not run `next build` while `next dev` is running: they share `.next`, and the dev server
 then reloads the page in a loop. Stop the dev server, build, then delete `.next` before
 starting it again.
@@ -104,12 +133,15 @@ Schema changes: edit `src/db/schema.ts`, then `npm run db:generate` and `npm run
 2. `docker compose up -d --build` (starts the app, the worker and Caddy)
 3. `docker compose run --rm app npx tsx scripts/migrate.ts`
 4. `docker compose run --rm -e USER_PASSWORD='...' app npx tsx scripts/create-user.ts you@example.com "Your Name" admin`
-5. Register the account-status webhook once:
+5. Register the webhooks (account status, messages, new connections) once:
    `docker compose run --rm app npx tsx --conditions=react-server scripts/register-webhooks.ts`
 6. Open `https://app.yourdomain.com`, sign in, connect one lower-risk account.
 
 **Check before the first real connection:** the Unipile request and payload shapes in
-`src/lib/unipile.ts` (hosted login, account status, people search, search parameters), the
+`src/lib/unipile.ts` (hosted login, account status, people search, search parameters,
+profile lookup, invites, chats and messages, relations), the webhook payloads in
+`src/app/api/unipile/webhook/route.ts`, the error types in `classifyError`
+(`src/lib/engine/engine.ts`), the
 search result field names in `src/lib/linkedin.ts`, and the status names in
 `src/lib/accounts.ts` were written from
 Unipile's documentation as I know it, because developer.unipile.com was not reachable from

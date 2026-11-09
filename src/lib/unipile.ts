@@ -8,21 +8,38 @@ import { env } from "./env";
  * https://developer.unipile.com before the first real connection.
  */
 
+/** An error response from Unipile, with the HTTP status and Unipile's error type (e.g. "errors/disconnected_account"). */
+export class UnipileError extends Error {
+  constructor(
+    readonly status: number,
+    readonly type: string,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
 async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
+  const isForm = typeof FormData !== "undefined" && body instanceof FormData;
   const res = await fetch(`https://${env.UNIPILE_DSN}/api/v1${path}`, {
     method,
     headers: {
       "X-API-KEY": env.UNIPILE_API_KEY,
       accept: "application/json",
-      ...(body ? { "content-type": "application/json" } : {}),
+      ...(body && !isForm ? { "content-type": "application/json" } : {}),
     },
-    body: body ? JSON.stringify(body) : undefined,
+    body: body ? (isForm ? (body as FormData) : JSON.stringify(body)) : undefined,
     cache: "no-store",
-    signal: AbortSignal.timeout(20_000),
+    signal: AbortSignal.timeout(30_000),
   });
   if (!res.ok) {
     const text = await res.text().catch(() => "");
-    throw new Error(`Unipile ${method} ${path} failed: ${res.status} ${text.slice(0, 300)}`);
+    let type = "";
+    try {
+      const j = JSON.parse(text) as { type?: string };
+      type = j.type ?? "";
+    } catch {}
+    throw new UnipileError(res.status, type, `Unipile ${method} ${path.split("?")[0]} failed: ${res.status} ${text.slice(0, 300)}`);
   }
   return (await res.json()) as T;
 }
@@ -98,14 +115,20 @@ export async function deleteAccount(unipileAccountId: string): Promise<void> {
   await call("DELETE", `/accounts/${encodeURIComponent(unipileAccountId)}`);
 }
 
-/** Registers the account-status webhook. Run once per deployment (scripts/register-webhooks.ts). */
-export async function registerAccountStatusWebhook(): Promise<unknown> {
-  return call("POST", "/webhooks", {
-    source: "account_status",
-    name: "account-status",
+/**
+ * Registers our webhooks: account status, new messages (replies) and new relations
+ * (accepted invites). Run once per deployment (scripts/register-webhooks.ts).
+ */
+export async function registerWebhooks(): Promise<unknown[]> {
+  const common = {
     request_url: `${env.APP_URL}/api/unipile/webhook`,
     headers: [{ key: "x-webhook-secret", value: env.UNIPILE_WEBHOOK_SECRET }],
-  });
+  };
+  return Promise.all([
+    call("POST", "/webhooks", { ...common, source: "account_status", name: "account-status" }),
+    call("POST", "/webhooks", { ...common, source: "messaging", name: "messages", events: ["message_received"] }),
+    call("POST", "/webhooks", { ...common, source: "users", name: "relations", events: ["new_relation"] }),
+  ]);
 }
 
 export function mockAccountId(): string {
@@ -173,6 +196,85 @@ export async function lookupSearchParameter(opts: {
 
 /** Errors that will not go away by retrying (bad URL, no Sales Navigator, auth). */
 export function isPermanentUnipileError(e: unknown): boolean {
-  const m = e instanceof Error ? e.message : "";
-  return /failed: (400|401|403|404|422)\b/.test(m);
+  return e instanceof UnipileError && [400, 401, 403, 404, 422].includes(e.status);
+}
+
+// ---------------------------------------------------------------------------
+// Sending (Phase 5). Shapes follow Unipile's users and messaging docs; verify before going live.
+
+export type LinkedInProfile = {
+  providerId: string;
+  publicIdentifier: string | null;
+  /** FIRST_DEGREE means already connected. */
+  networkDistance: string | null;
+  /** True when an invitation from this account is already pending. */
+  invitePending: boolean;
+};
+
+export async function getProfile(unipileAccountId: string, identifier: string): Promise<LinkedInProfile> {
+  const r = await call<{
+    provider_id: string;
+    public_identifier?: string | null;
+    network_distance?: string | null;
+    invitation?: { type?: string; status?: string } | null;
+  }>("GET", `/users/${encodeURIComponent(identifier)}?account_id=${encodeURIComponent(unipileAccountId)}`);
+  return {
+    providerId: r.provider_id,
+    publicIdentifier: r.public_identifier ?? null,
+    networkDistance: r.network_distance ?? null,
+    invitePending: r.invitation?.type === "SENT" && r.invitation?.status === "PENDING",
+  };
+}
+
+export async function sendInvite(unipileAccountId: string, providerId: string, note: string | null): Promise<void> {
+  await call("POST", "/users/invite", {
+    account_id: unipileAccountId,
+    provider_id: providerId,
+    ...(note ? { message: note } : {}),
+  });
+}
+
+/** Starts a chat with a first message, or adds to the existing one. Returns the chat id. */
+export async function sendMessage(opts: {
+  unipileAccountId: string;
+  providerId: string;
+  chatId: string | null;
+  text: string;
+}): Promise<string> {
+  const form = new FormData();
+  form.set("text", opts.text);
+  if (opts.chatId) {
+    await call("POST", `/chats/${encodeURIComponent(opts.chatId)}/messages`, form);
+    return opts.chatId;
+  }
+  form.set("account_id", opts.unipileAccountId);
+  form.append("attendees_ids", opts.providerId);
+  const r = await call<{ chat_id: string }>("POST", "/chats", form);
+  return r.chat_id;
+}
+
+export type ChatMessage = { id: string; text: string; fromProspect: boolean; at: string };
+
+export async function recentChatMessages(chatId: string, limit = 20): Promise<ChatMessage[]> {
+  const r = await call<{ items?: { id: string; text?: string | null; is_sender?: number | boolean; timestamp?: string }[] }>(
+    "GET",
+    `/chats/${encodeURIComponent(chatId)}/messages?limit=${limit}`,
+  );
+  return (r.items ?? []).map((m) => ({
+    id: m.id,
+    text: m.text ?? "",
+    fromProspect: !(m.is_sender === 1 || m.is_sender === true),
+    at: m.timestamp ?? "",
+  }));
+}
+
+export type Relation = { providerId: string | null; publicIdentifier: string | null };
+
+/** The account's most recent connections, newest first. */
+export async function recentRelations(unipileAccountId: string, limit = 100): Promise<Relation[]> {
+  const r = await call<{ items?: { member_id?: string; public_identifier?: string }[] }>(
+    "GET",
+    `/users/relations?account_id=${encodeURIComponent(unipileAccountId)}&limit=${limit}`,
+  );
+  return (r.items ?? []).map((x) => ({ providerId: x.member_id ?? null, publicIdentifier: x.public_identifier?.toLowerCase() ?? null }));
 }

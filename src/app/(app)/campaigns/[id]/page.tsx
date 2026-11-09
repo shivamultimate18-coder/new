@@ -23,6 +23,7 @@ const TABS = [
 
 const LEAD_STATUS: Record<string, { label: string; tone: string }> = {
   pending: { label: "Not started", tone: "bg-zinc-100 text-zinc-700" },
+  // "active" covers waiting for acceptance, approval or the next message; the note says which.
   active: { label: "In progress", tone: "bg-blue-50 text-blue-800" },
   completed: { label: "Completed", tone: "bg-emerald-50 text-emerald-800" },
   replied: { label: "Replied", tone: "bg-emerald-50 text-emerald-800" },
@@ -63,6 +64,7 @@ export default async function CampaignPage({ params, searchParams }: PageProps<"
       .innerJoin(schema.accounts, eq(schema.accounts.id, schema.campaignAccounts.accountId))
       .where(eq(schema.campaignAccounts.campaignId, id)),
   ]);
+  const pausedAccounts = accounts.filter(({ a }) => a.status !== "ok" || !a.enabled);
   const by = Object.fromEntries(counts.map((r) => [r.status, r.n])) as Record<string, number>;
   const total = counts.reduce((n, r) => n + (r.status === "skipped" ? 0 : r.n), 0);
   const ready = checks.every((x) => x.ok);
@@ -126,9 +128,11 @@ export default async function CampaignPage({ params, searchParams }: PageProps<"
         )}
       </div>
 
-      {c.status === "running" && (
-        <p className="mt-4 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
-          Leads are enrolled and waiting. The sending engine is the next part to be built, so nothing is sent to LinkedIn yet.
+      {c.status === "running" && pausedAccounts.length > 0 && (
+        <p role="alert" className="mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900">
+          {pausedAccounts.length === accounts.length ? "Every sending account is" : `${pausedAccounts.length} sending account${pausedAccounts.length === 1 ? " is" : "s are"}`} paused or disconnected, so
+          {pausedAccounts.length === accounts.length ? " nothing is being sent." : " their leads are waiting."} Check the{" "}
+          <Link href="/accounts" className="underline">Accounts</Link> page.
         </p>
       )}
       {notReadyError && (

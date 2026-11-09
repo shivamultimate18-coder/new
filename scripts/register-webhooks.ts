@@ -1,7 +1,7 @@
-// Registers the Unipile account-status webhook for this deployment. Run once after going live.
-import { registerAccountStatusWebhook } from "../src/lib/unipile";
+// Registers the Unipile webhooks (account status, messages, new relations). Run once after going live.
+import { registerWebhooks } from "../src/lib/unipile";
 
-registerAccountStatusWebhook()
+registerWebhooks()
   .then((r) => console.log("Registered:", JSON.stringify(r)))
   .catch((e) => {
     console.error(e instanceof Error ? e.message : e);

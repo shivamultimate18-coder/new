@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
-import { asc, eq } from "drizzle-orm";
+import { and, asc, count, eq, gte, inArray } from "drizzle-orm";
 import { ConfirmButton } from "@/components/confirm-button";
 import { db, schema } from "@/db";
+import { hoursAgo } from "@/lib/time";
 import type { Account } from "@/db/schema";
 import { requireUser } from "@/lib/auth";
 import {
@@ -65,6 +66,15 @@ export default async function AccountsPage({ searchParams }: PageProps<"/account
     .from(schema.accounts)
     .leftJoin(schema.users, eq(schema.users.id, schema.accounts.ownerUserId))
     .orderBy(asc(schema.accounts.createdAt));
+
+  // Sending in the last 24 hours, per account (the engine's limits are rolling 24 hours).
+  const since = hoursAgo(24);
+  const activity = await db
+    .select({ accountId: schema.activityLog.accountId, type: schema.activityLog.type, n: count() })
+    .from(schema.activityLog)
+    .where(and(gte(schema.activityLog.at, since), inArray(schema.activityLog.type, ["invite.sent", "message.sent"])))
+    .groupBy(schema.activityLog.accountId, schema.activityLog.type);
+  const sent = (id: string, type: string) => activity.find((r) => r.accountId === id && r.type === type)?.n ?? 0;
 
   return (
     <div className="max-w-6xl">
@@ -153,6 +163,9 @@ export default async function AccountsPage({ searchParams }: PageProps<"/account
 
                 <div className="mt-3 flex flex-wrap gap-2 text-xs font-medium">
                   <span className={`rounded-full px-2 py-0.5 ${status.tone}`}>{status.label}</span>
+                  {a.status === "ok" && !a.enabled && a.pausedReason && (
+                    <span className="rounded-full bg-red-50 px-2 py-0.5 text-red-800">Paused by the sending engine</span>
+                  )}
                   <span
                     className={`rounded-full px-2 py-0.5 ${
                       a.enabled ? "bg-blue-50 text-blue-800" : "bg-zinc-100 text-zinc-700"
@@ -179,12 +192,15 @@ export default async function AccountsPage({ searchParams }: PageProps<"/account
                     <dd>{ago(a.lastActivityAt)}</dd>
                   </div>
                   <div>
-                    <dt className="text-muted">Invites per day</dt>
-                    <dd className="tabular-nums">up to {a.dailyInviteLimit}</dd>
+                    <dt className="text-muted">Invites, last 24 h</dt>
+                    <dd className="tabular-nums">
+                      {sent(a.id, "invite.sent")} of {a.dailyInviteLimit}
+                      {a.dailyInviteLimit < 15 && <span className="text-xs text-muted"> · warming up</span>}
+                    </dd>
                   </div>
                   <div>
-                    <dt className="text-muted">Messages per day</dt>
-                    <dd className="tabular-nums">up to {a.dailyMessageLimit}</dd>
+                    <dt className="text-muted">Messages, last 24 h</dt>
+                    <dd className="tabular-nums">{sent(a.id, "message.sent")} of {a.dailyMessageLimit}</dd>
                   </div>
                 </dl>
 

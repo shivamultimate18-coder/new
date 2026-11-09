@@ -60,6 +60,14 @@ export const accounts = pgTable(
     dailyMessageLimit: integer("daily_message_limit").notNull().default(20),
     connectedAt: timestamp("connected_at", { withTimezone: true }),
     lastActivityAt: timestamp("last_activity_at", { withTimezone: true }),
+    // Sending engine (Phase 5)
+    /** Earliest time the engine may take this account's next action (random gaps). */
+    nextActionAt: timestamp("next_action_at", { withTimezone: true }),
+    /** Temporary errors in a row; three pause the account. */
+    consecutiveErrors: integer("consecutive_errors").notNull().default(0),
+    lastErrorAt: timestamp("last_error_at", { withTimezone: true }),
+    warmupRaisedAt: timestamp("warmup_raised_at", { withTimezone: true }),
+    relationsCheckedAt: timestamp("relations_checked_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index("accounts_status_idx").on(t.status)],
@@ -138,6 +146,8 @@ export const leads = pgTable(
     dedupeKey: text("dedupe_key").notNull(),
     linkedinId: text("linkedin_id"),
     publicIdentifier: text("public_identifier"),
+    /** LinkedIn member id as Unipile uses it for invites and messages; looked up before the first action. */
+    providerId: text("provider_id"),
     profileUrl: text("profile_url"),
     firstName: text("first_name").notNull().default(""),
     lastName: text("last_name").notNull().default(""),
@@ -340,14 +350,51 @@ export const leadState = pgTable(
     stepIndex: integer("step_index").notNull().default(0),
     nextRunAt: timestamp("next_run_at", { withTimezone: true }),
     lastActionAt: timestamp("last_action_at", { withTimezone: true }),
+    /** What the lead is waiting for: "acceptance", "approval" (AI draft), or null when due at nextRunAt. */
+    waiting: text("waiting"),
+    /** Set while an action is in flight so no other worker picks the lead. */
+    lockedUntil: timestamp("locked_until", { withTimezone: true }),
+    inviteSentAt: timestamp("invite_sent_at", { withTimezone: true }),
+    acceptedAt: timestamp("accepted_at", { withTimezone: true }),
+    repliedAt: timestamp("replied_at", { withTimezone: true }),
+    chatId: text("chat_id"),
     note: text("note"),
     enrolledAt: timestamp("enrolled_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     uniqueIndex("lead_state_campaign_lead_idx").on(t.campaignId, t.leadId),
     index("lead_state_due_idx").on(t.status, t.nextRunAt),
+    index("lead_state_account_idx").on(t.accountId, t.status),
+    index("lead_state_chat_idx").on(t.chatId),
     index("lead_state_campaign_status_idx").on(t.campaignId, t.status),
   ],
+);
+
+/**
+ * One message for one lead at one step. Phase 6 adds drafting and the review screen; the
+ * sending engine only sends approved drafts for AI steps.
+ * drafted > approved > sent; discarded drafts are kept for history.
+ */
+export const draftStatus = pgEnum("draft_status", ["drafted", "approved", "sent", "discarded"]);
+
+export const messageDrafts = pgTable(
+  "message_drafts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    leadStateId: uuid("lead_state_id")
+      .notNull()
+      .references(() => leadState.id, { onDelete: "cascade" }),
+    stepIndex: integer("step_index").notNull(),
+    body: text("body").notNull(),
+    status: draftStatus("status").notNull().default("drafted"),
+    version: integer("version").notNull().default(1),
+    approvedByUserId: uuid("approved_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    approvedAt: timestamp("approved_at", { withTimezone: true }),
+    sentAt: timestamp("sent_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("message_drafts_state_step_idx").on(t.leadStateId, t.stepIndex), index("message_drafts_status_idx").on(t.status)],
 );
 
 export type User = typeof users.$inferSelect;

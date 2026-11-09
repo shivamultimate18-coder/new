@@ -58,7 +58,8 @@ export async function setEnabled(formData: FormData) {
   if (enabled && row.status !== "ok") return; // only connected accounts can be switched on
   await db
     .update(schema.accounts)
-    .set({ enabled })
+    // Switching on again clears a pause from the sending engine.
+    .set(enabled ? { enabled, pausedReason: null, consecutiveErrors: 0, nextActionAt: null } : { enabled })
     .where(and(eq(schema.accounts.id, row.id)));
   await db.insert(schema.activityLog).values({
     accountId: row.id,

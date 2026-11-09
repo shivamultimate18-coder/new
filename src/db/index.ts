@@ -5,12 +5,17 @@ import { env } from "@/lib/env";
 import * as schema from "./schema";
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
-const globalForDb = globalThis as unknown as { db?: Db };
+
+// The connection pool survives dev hot reloads; the query builder is rebuilt with each
+// module load so it always uses the current schema.
+const globalForDb = globalThis as unknown as { pg?: ReturnType<typeof postgres> };
+let instance: Db | undefined;
 
 function real(): Db {
-  // Created on first use (so `next build` needs no database) and reused across hot reloads.
-  globalForDb.db ??= drizzle(postgres(env.DATABASE_URL, { max: 10 }), { schema });
-  return globalForDb.db;
+  // Created on first use, so `next build` needs no database.
+  globalForDb.pg ??= postgres(env.DATABASE_URL, { max: 10 });
+  instance ??= drizzle(globalForDb.pg, { schema });
+  return instance;
 }
 
 export const db = new Proxy({} as Db, {
