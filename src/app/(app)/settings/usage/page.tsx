@@ -14,6 +14,7 @@ const FEATURE: Record<string, string> = {
   "product.icp": "Customer profiles",
   "inbox.classify": "Reply labels",
   "inbox.suggest": "Suggested replies",
+  "playground.prospect": "Playground prospect replies",
 };
 const usd = (n: number) => `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 

@@ -3,8 +3,8 @@
 import { useActionState, useEffect, useState, useTransition } from "react";
 import { keepFieldsOnSubmit } from "@/components/use-keep-form";
 import type { RuleSet } from "@/db/schema";
-import { addLearnedRules, learnFromFeedback, runPlayground, searchLeads } from "../../actions";
-import type { LeadOption } from "../../actions";
+import { addLearnedRules, learnFromFeedback, runPlayground, searchLeads, simulateProspectReply } from "../../actions";
+import type { LeadOption, SimulatedReply } from "../../actions";
 
 const STEP_LABEL: Record<string, string> = { opener: "Opener", follow_up_1: "Follow-up 1", last_note: "Last note" };
 
@@ -117,6 +117,132 @@ export function RuleProposals({ styleId, rules, onDone }: { styleId: string; rul
 
 type Run = NonNullable<NonNullable<Awaited<ReturnType<typeof runPlayground>>>["run"]>;
 
+const QUICK_REPLIES = [
+  { label: "Interested", text: "Sounds interesting. Can you tell me more about how it works and what it costs?" },
+  { label: "Not now", text: "Maybe later. We are busy this quarter, reach out again in a few months." },
+  { label: "Not interested", text: "Not interested, thanks." },
+  { label: "Pitch back", text: "Thanks! We actually offer a similar service ourselves. Would you like a quick demo of ours?" },
+];
+
+const INTENT_TONE: Record<string, string> = {
+  interested: "bg-emerald-50 text-emerald-800",
+  maybe: "bg-amber-50 text-amber-800",
+  not_interested: "bg-zinc-100 text-zinc-700",
+  pitching_us: "bg-violet-50 text-violet-800",
+  needs_human: "bg-red-50 text-red-800",
+};
+
+/** The teammate plays the prospect: skip a message, or reply and see what the system would do. */
+function ProspectMode({ run }: { run: Run }) {
+  const total = run.output.messages.length;
+  const [shown, setShown] = useState(1); // how many of our messages the "prospect" has received
+  const [reply, setReply] = useState("");
+  const [sentReply, setSentReply] = useState<string | null>(null);
+  const [result, setResult] = useState<SimulatedReply | null>(null);
+  const [busy, start] = useTransition();
+  const finished = !sentReply && shown >= total;
+
+  const send = (text: string) =>
+    start(async () => {
+      setSentReply(text);
+      setResult(null);
+      setResult(await simulateProspectReply(run.id, shown - 1, text));
+    });
+  const restart = () => {
+    setShown(1);
+    setReply("");
+    setSentReply(null);
+    setResult(null);
+  };
+
+  return (
+    <div className="card space-y-4 p-4" aria-label="Prospect mode">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <div>
+          <h3 className="text-sm font-medium">Play the prospect</h3>
+          <p className="text-xs text-muted">See the sequence as {run.prospectName} would, then reply and see what the system does next.</p>
+        </div>
+        {(shown > 1 || sentReply) && (
+          <button type="button" onClick={restart} className="text-sm text-brand hover:underline">Start over</button>
+        )}
+      </div>
+
+      <ol className="space-y-3">
+        {run.output.messages.slice(0, shown).map((m, i) => (
+          <li key={m.step} className="flex justify-end">
+            <div className="max-w-[85%] rounded-xl bg-brand/10 px-3.5 py-2.5 text-sm">
+              <p className="whitespace-pre-wrap leading-relaxed">{m.body}</p>
+              <p className="mt-1 text-xs text-muted">{STEP_LABEL[m.step]}{i > 0 ? " · sent a few days later, no reply yet" : ""}</p>
+            </div>
+          </li>
+        ))}
+        {sentReply && (
+          <li className="flex justify-start">
+            <div className="max-w-[85%] rounded-xl bg-canvas px-3.5 py-2.5 text-sm">
+              <p className="whitespace-pre-wrap leading-relaxed">{sentReply}</p>
+              <p className="mt-1 text-xs text-muted">{run.prospectName.split(" ")[0]} replied</p>
+            </div>
+          </li>
+        )}
+      </ol>
+
+      {!sentReply && !finished && (
+        <div className="space-y-2 border-t border-line pt-3">
+          <div className="flex flex-wrap gap-2">
+            {shown < total && (
+              <button type="button" onClick={() => setShown((n) => n + 1)} className="btn btn-secondary">
+                No reply: send {STEP_LABEL[run.output.messages[shown].step].toLowerCase()}
+              </button>
+            )}
+            {QUICK_REPLIES.map((q) => (
+              <button key={q.label} type="button" disabled={busy} onClick={() => send(q.text)} className="btn btn-secondary">
+                Reply: {q.label}
+              </button>
+            ))}
+          </div>
+          <label className="block text-xs font-medium text-muted">
+            Or write the prospect&apos;s reply
+            <textarea rows={2} value={reply} onChange={(e) => setReply(e.target.value)} className="input mt-1 text-sm font-normal text-ink" />
+          </label>
+          <button type="button" disabled={busy || !reply.trim()} onClick={() => send(reply)} className="btn btn-primary">
+            Send as the prospect
+          </button>
+        </div>
+      )}
+
+      {finished && (
+        <p role="status" className="border-t border-line pt-3 text-sm text-muted">
+          No reply to any message: the sequence ends here and the lead is marked completed. Nothing more is sent.
+        </p>
+      )}
+
+      {sentReply && (
+        <div className="space-y-3 border-t border-line pt-3" aria-live="polite">
+          {busy && <p className="text-sm text-muted">Working out what happens next…</p>}
+          {result?.error && <p role="alert" className="text-sm text-red-700">{result.error}</p>}
+          {result && !result.error && (
+            <>
+              <p className="text-sm">
+                <span className="font-medium">The sequence stops.</span>{" "}
+                {result.cancelled ? `${result.cancelled} remaining message${result.cancelled === 1 ? " is" : "s are"} cancelled.` : "It was the last message anyway."}
+              </p>
+              <p className="flex flex-wrap items-center gap-2 text-sm">
+                <span className="font-medium">Inbox label:</span>
+                <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${INTENT_TONE[result.intent ?? ""] ?? ""}`}>{result.intentLabel}</span>
+                <span className="text-muted">{result.reason}</span>
+              </p>
+              <div>
+                <p className="text-sm font-medium">Suggested reply in the Inbox</p>
+                <p className="mt-1 whitespace-pre-wrap rounded-lg bg-canvas p-3 text-sm leading-relaxed">{result.suggestion}</p>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** One draft with its feedback boxes. Keyed by run id, so a new draft starts clean. */
 function DraftView({ run, styleId }: { run: Run; styleId: string }) {
   const [feedback, setFeedback] = useState<Record<string, string>>({});
@@ -181,6 +307,7 @@ function DraftView({ run, styleId }: { run: Run; styleId: string }) {
           proposals && <RuleProposals styleId={styleId} rules={proposals} onDone={() => { setAdded(true); setProposals(null); }} />
         )}
       </div>
+      <ProspectMode run={run} />
     </section>
   );
 }

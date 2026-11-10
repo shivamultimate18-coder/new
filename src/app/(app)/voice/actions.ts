@@ -7,6 +7,7 @@ import { db, schema } from "@/db";
 import type { DraftSequence, RuleSet } from "@/db/schema";
 import { friendlyAiError } from "@/lib/ai";
 import { requireUser } from "@/lib/auth";
+import { INTENT_LABEL, classifyThread, draftReply } from "@/lib/inbox";
 import type { CurrentUser } from "@/lib/auth";
 import { draftIcp, draftSequence, proposeRules } from "@/lib/voice/compose";
 import type { Prospect } from "@/lib/voice/compose";
@@ -297,4 +298,49 @@ export async function addLearnedRules(styleId: string, rules: RuleSet): Promise<
   );
   revalidatePath(`/voice/styles/${styleId}`);
   return { ok: true };
+}
+
+// ---------------------------------------------------------------------------
+// Prospect mode: the teammate plays the prospect and replies to a drafted message.
+
+export type SimulatedReply = {
+  error?: string;
+  intent?: string;
+  intentLabel?: string;
+  reason?: string;
+  suggestion?: string;
+  cancelled?: number;
+};
+
+export async function simulateProspectReply(runId: string, afterStep: number, reply: string): Promise<SimulatedReply> {
+  const user = await requireUser();
+  const text = reply.trim().slice(0, 2000);
+  if (!text) return { error: "Write the prospect's reply first." };
+  const [run] = await db.select().from(schema.playgroundRuns).where(eq(schema.playgroundRuns.id, runId));
+  if (!run) return { error: "This draft no longer exists. Draft again." };
+  const [style] = await db.select().from(schema.writingStyles).where(eq(schema.writingStyles.id, run.styleId));
+  const [product] = run.productId ? await db.select().from(schema.products).where(eq(schema.products.id, run.productId)) : [];
+  const sent = run.output.messages.slice(0, Math.max(1, Math.min(afterStep + 1, run.output.messages.length)));
+  const thread = [...sent.map((m) => ({ direction: "out" as const, body: m.body })), { direction: "in" as const, body: text }];
+  try {
+    const label = await classifyThread(thread, "playground.prospect", user.id);
+    const suggestion = await draftReply({
+      thread,
+      product: product ?? null,
+      rules: style?.rules ?? null,
+      prospectFirstName: run.prospect.firstName ?? "",
+      feature: "playground.prospect",
+      userId: user.id,
+    });
+    return {
+      intent: label.intent,
+      intentLabel: INTENT_LABEL[label.intent],
+      reason: label.reason,
+      suggestion,
+      cancelled: run.output.messages.length - sent.length,
+    };
+  } catch (e) {
+    console.error(e);
+    return { error: friendlyAiError(e) };
+  }
 }

@@ -136,6 +136,9 @@ Phase 3, Voice:
   product, and an activity log of every rule change
 - **Playground:** drafts opener, follow-up 1 and last note for an imported lead or a made-up
   prospect. Feedback on any message is turned into proposed rules that you accept one by one.
+  **Play the prospect:** let messages go unanswered one by one, or reply (quick replies or
+  your own words) and see what the system would do: remaining messages cancelled, the Inbox
+  label and reason, and the suggested reply, using the same code as the real Inbox.
 - **Step rules enforced in code** (`src/lib/voice/compose.ts`): each product field is only
   offered for the steps that may use it, and every draft is checked for links and prices in
   the opener, links in follow-up 1, prices in the last note, and the free offer appearing
