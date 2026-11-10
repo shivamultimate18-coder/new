@@ -52,6 +52,12 @@ export function LineChart({ days, series, title }: { days: string[]; series: Ser
     const last = days.length - 1;
     const items = series.map((s) => ({ s, y: y(s.values[last] ?? 0) })).sort((a, b) => a.y - b.y);
     for (let i = 1; i < items.length; i++) if (items[i].y - items[i - 1].y < 14) items[i].y = items[i - 1].y + 14;
+    // If the stack runs below the plot (lines ending at 0), push it back up from the bottom.
+    const bottom = PAD.top + H;
+    if (items.length && items[items.length - 1].y > bottom) {
+      items[items.length - 1].y = bottom;
+      for (let i = items.length - 2; i >= 0; i--) if (items[i + 1].y - items[i].y < 14) items[i].y = items[i + 1].y - 14;
+    }
     return items;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [series, days.length, yMax]);
