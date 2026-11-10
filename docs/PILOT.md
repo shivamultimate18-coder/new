@@ -3,7 +3,7 @@
 Goal (plan section 7): run one lower-risk LinkedIn account through a 20-lead campaign with
 every message reviewed, confirm sending, replies, stop-on-reply and auto-pause work, and
 measure the real acceptance rate and AI cost. About 2 to 3 days of calendar time; roughly
-2 hours of hands-on work.
+1.5 hours of hands-on work.
 
 Never paste API keys or passwords into chats, tickets or this repository. They go only in
 the server's `.env` file.
@@ -17,50 +17,38 @@ the server's `.env` file.
 | Hetzner | hetzner.com/cloud | One server: Ubuntu 24.04, CX22 (2 vCPU, 4 GB) is enough for the pilot |
 | A domain | any registrar | A subdomain such as `app.yourdomain.com` |
 
-## 2. Server setup (about 45 minutes)
+## 2. Server setup (about 10 minutes)
 
-1. Create the server with your SSH key (no password login). In the Hetzner firewall allow
-   only ports 22, 80 and 443.
+1. Create the server (Ubuntu 24.04) with your SSH key, no password login. In the Hetzner
+   firewall allow only ports 22, 80 and 443. Turn on backups.
 2. Point a DNS **A record** for `app.yourdomain.com` at the server's IP address.
-3. On the server, install Docker:
+3. Log in to the server and run:
    ```bash
-   curl -fsSL https://get.docker.com | sh
+   git clone https://github.com/shivamultimate18-coder/new outreach && cd outreach && sudo bash scripts/setup-server.sh
    ```
-4. Get the code:
-   ```bash
-   git clone https://github.com/shivamultimate18-coder/new outreach && cd outreach
-   ```
-5. Create `.env` (copy `.env.example` and fill it in):
-   ```bash
-   cp .env.example .env && nano .env
-   ```
-   - `DOMAIN=app.yourdomain.com` and `APP_URL=https://app.yourdomain.com`
-   - `POSTGRES_PASSWORD=` a long random string (`openssl rand -hex 24`)
-   - `DATABASE_URL=postgres://outreach:<that password>@db:5432/outreach`
-   - `AUTH_SECRET=` output of `openssl rand -base64 48`
-   - `UNIPILE_WEBHOOK_SECRET=` output of `openssl rand -hex 24`
-   - `UNIPILE_DSN=` and `UNIPILE_API_KEY=` from Unipile
-   - `ANTHROPIC_API_KEY=` from Anthropic
-   - `APP_TIMEZONE=` your team's timezone, e.g. `Asia/Kolkata`
-   - leave `UNIPILE_MOCK` and `AI_MOCK` **empty**
-6. Start everything, with the database on the same server for the pilot:
-   ```bash
-   docker compose --profile with-db up -d --build
-   ```
-7. Create the database tables:
-   ```bash
-   docker compose run --rm app npx tsx scripts/migrate.ts
-   ```
-8. Create your admin login (the password is printed once; save it in your password manager):
-   ```bash
-   docker compose run --rm app npx tsx scripts/create-user.ts you@example.com "Your Name" admin
-   ```
-9. Register Unipile's webhooks (account status, messages, new connections):
-   ```bash
-   docker compose run --rm app npx tsx --conditions=react-server scripts/register-webhooks.ts
-   ```
-10. Open `https://app.yourdomain.com` and sign in. The padlock in the browser confirms HTTPS.
-11. Turn on Hetzner backups for the server.
+   It installs Docker, asks for your domain, timezone, Unipile DSN and API key and
+   Anthropic API key (typed on the server, never shown), generates every other secret into
+   `.env` (readable by root only), checks the domain points at the server, starts the app,
+   worker and database, creates the tables and your admin login (the password is printed
+   once: save it), registers Unipile's webhooks, and checks HTTPS.
+4. Open `https://app.yourdomain.com` and sign in.
+
+The script is safe to run again, for example after fixing a DNS record or a key.
+
+<details>
+<summary>Doing it by hand instead</summary>
+
+1. Install Docker: `curl -fsSL https://get.docker.com | sh`
+2. `cp .env.example .env` and fill in `DOMAIN`, `APP_URL=https://<domain>`, `APP_TIMEZONE`,
+   `POSTGRES_PASSWORD` (`openssl rand -hex 24`), `DATABASE_URL=postgres://outreach:<that
+   password>@db:5432/outreach`, `AUTH_SECRET` (`openssl rand -base64 48`),
+   `UNIPILE_WEBHOOK_SECRET` (`openssl rand -hex 24`), `UNIPILE_DSN`, `UNIPILE_API_KEY`,
+   `ANTHROPIC_API_KEY`; leave `UNIPILE_MOCK` and `AI_MOCK` empty.
+3. `docker compose --profile with-db up -d --build`
+4. `docker compose run --rm app npx tsx scripts/migrate.ts`
+5. `docker compose run --rm app npx tsx scripts/create-user.ts you@example.com "Your Name" admin`
+6. `docker compose run --rm app npx tsx --conditions=react-server scripts/register-webhooks.ts`
+</details>
 
 ## 3. Set up the pilot in the app (about 30 minutes)
 

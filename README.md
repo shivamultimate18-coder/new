@@ -219,7 +219,8 @@ a reply, no leads left locked).
 
 ## Going live
 
-**Step-by-step pilot guide: [docs/PILOT.md](docs/PILOT.md)** (accounts to open, server setup,
+**Step-by-step pilot guide: [docs/PILOT.md](docs/PILOT.md)**. On a fresh Ubuntu server,
+`sudo bash scripts/setup-server.sh` does the whole server setup in one go (accounts to open, server setup,
 the first 20-lead campaign, what to watch, and how to decide on rollout). (Phase 1 parts of plan section 7)
 
 1. Fill `.env` on the app server: `DATABASE_URL` (database server's private IP), `APP_URL`
