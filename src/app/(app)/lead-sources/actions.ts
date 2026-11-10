@@ -7,8 +7,8 @@ import { redirect } from "next/navigation";
 import { db, schema } from "@/db";
 import { requireUser } from "@/lib/auth";
 import { MAX_PAGES, insertLeads, scheduleNextPage } from "@/lib/imports";
-import { checkSalesNavUrl, leadFromCsvRow, mapCsvHeaders } from "@/lib/linkedin";
-import type { LeadInput } from "@/lib/linkedin";
+import { CSV_FIELDS, checkSalesNavUrl, leadFromCsvRow, mapCsvHeaders } from "@/lib/linkedin";
+import type { CsvMapping, LeadInput } from "@/lib/linkedin";
 import { canManageList, usableAccounts } from "@/lib/permissions";
 import { lookupSearchParameter } from "@/lib/unipile";
 import type { SearchBody } from "@/lib/unipile";
@@ -170,6 +170,33 @@ export async function createBasicSearch(_prev: FormState, fd: FormData): Promise
 const MAX_CSV_BYTES = 5 * 1024 * 1024;
 const MAX_CSV_ROWS = 10_000;
 
+async function readCsv(file: File) {
+  const text = (await file.text()).replace(/^\uFEFF/, "");
+  const parsed = Papa.parse<Record<string, string>>(text, { header: true, skipEmptyLines: "greedy" });
+  return { rows: parsed.data, headers: (parsed.meta.fields ?? []).filter((h) => h.trim()) };
+}
+
+export type CsvPreview = {
+  error?: string;
+  headers?: string[];
+  sample?: Record<string, string>[];
+  rowCount?: number;
+  mapping?: CsvMapping;
+};
+
+/** Reads a CSV's header and first rows so the person can check how columns are matched. */
+export async function previewCsv(fd: FormData): Promise<CsvPreview> {
+  await requireUser();
+  const file = fd.get("file");
+  if (!(file instanceof File) || file.size === 0) return { error: "Choose a CSV file." };
+  if (file.size > MAX_CSV_BYTES) return { error: "The file is larger than 5 MB. Split it and import the parts." };
+  const { rows, headers } = await readCsv(file);
+  if (!headers.length) return { error: "The file has no header row." };
+  if (rows.length > MAX_CSV_ROWS) return { error: `The file has ${rows.length.toLocaleString()} rows. The limit is ${MAX_CSV_ROWS.toLocaleString()} per import.` };
+  const sample = rows.slice(0, 3).map((r) => Object.fromEntries(headers.map((h) => [h, String(r[h] ?? "").slice(0, 80)])));
+  return { headers: headers.slice(0, 100), sample, rowCount: rows.length, mapping: mapCsvHeaders(headers) };
+}
+
 export async function importCsv(_prev: FormState, fd: FormData): Promise<FormState> {
   const user = await requireUser();
   const values = valuesOf(fd);
@@ -179,17 +206,30 @@ export async function importCsv(_prev: FormState, fd: FormData): Promise<FormSta
   if (!(file instanceof File) || file.size === 0) return { error: "Choose a CSV file.", values };
   if (file.size > MAX_CSV_BYTES) return { error: "The file is larger than 5 MB. Split it and import the parts.", values };
 
-  const text = (await file.text()).replace(/^﻿/, "");
-  const parsed = Papa.parse<Record<string, string>>(text, { header: true, skipEmptyLines: "greedy" });
-  const headers = parsed.meta.fields ?? [];
+  const { rows, headers } = await readCsv(file);
+  const parsed = { data: rows };
   if (!headers.length) return { error: "The file has no header row.", values };
   if (parsed.data.length > MAX_CSV_ROWS) {
     return { error: `The file has ${parsed.data.length.toLocaleString()} rows. The limit is ${MAX_CSV_ROWS.toLocaleString()} per import.`, values };
   }
-  const mapping = mapCsvHeaders(headers);
+  // A mapping chosen in the column chooser wins; otherwise match columns by name.
+  let mapping: CsvMapping = mapCsvHeaders(headers);
+  const chosen = str(fd, "mapping");
+  if (chosen) {
+    try {
+      const raw = JSON.parse(chosen) as Record<string, string>;
+      const allowed = new Set(CSV_FIELDS.map((f) => f.key as string));
+      mapping = Object.fromEntries(Object.entries(raw).filter(([k, v]) => allowed.has(k) && typeof v === "string" && headers.includes(v))) as CsvMapping;
+    } catch (e) {
+      console.error("[csv] could not read the column choices:", e);
+      return { error: "The column choices could not be read. Choose the file again.", values };
+    }
+  }
   if (!mapping.profileUrl && !(mapping.firstName || mapping.fullName)) {
     return {
-      error: `Could not find a LinkedIn URL column or a name column. Columns found: ${headers.slice(0, 12).join(", ")}.`,
+      error: chosen
+        ? "Choose a column for the LinkedIn profile URL, or for the name."
+        : `Could not find a LinkedIn URL column or a name column. Columns found: ${headers.slice(0, 12).join(", ")}.`,
       values,
     };
   }

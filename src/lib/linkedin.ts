@@ -138,6 +138,20 @@ const ALIASES: Record<string, string[]> = {
 
 export type CsvMapping = Partial<Record<keyof typeof ALIASES, string>>;
 
+/** The fields a CSV column can map to, in the order the chooser shows them. */
+export const CSV_FIELDS: { key: keyof typeof ALIASES; label: string }[] = [
+  { key: "profileUrl", label: "LinkedIn profile URL" },
+  { key: "firstName", label: "First name" },
+  { key: "lastName", label: "Last name" },
+  { key: "fullName", label: "Full name (if no first/last)" },
+  { key: "company", label: "Company" },
+  { key: "title", label: "Job title" },
+  { key: "headline", label: "Headline" },
+  { key: "location", label: "Location" },
+  { key: "industry", label: "Industry" },
+  { key: "email", label: "Email" },
+];
+
 export function mapCsvHeaders(headers: string[]): CsvMapping {
   const norm = (h: string) => h.toLowerCase().replace(/[\s_\-.]/g, "");
   const mapping: CsvMapping = {};
